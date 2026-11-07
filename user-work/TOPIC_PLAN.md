@@ -3,6 +3,9 @@
 - Literature & Math Review: Deep dive into the theoretical formulations of the core baselines: flow matching in StableHand [1], world-space interaction tracking in EgoGrasp [2], and world-grounded lifting in WHOLE [3].
 - Data Pipeline Construction: Set up the training environments and download standard egocentric datasets (e.g., Ego4D, EPIC-Kitchens, HOI4D).
 - Deliverable: A unified codebase skeleton and data loader capable of parsing egocentric video inputs into a standard format for 3D hand and object pose extraction.
+
+### Tracking
+- Read EgoGrasp
 ## Month 2: Baseline Reproduction and Bottleneck Profiling
 - Execute Baselines: Run the pre-trained inference models for StableHand, EgoGrasp, and WHOLE to extract 3D hand-object trajectories.
 - Failure Case Analysis: Systematically profile where these baselines fail in dexterous manipulation contexts (e.g., occlusion, penetration, temporal jitter).
