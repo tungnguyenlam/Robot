@@ -1,7 +1,7 @@
 ## Machine
 
 - Read `CURRENT_MACHINE.md` first. It's a per-machine file, untracked via
-  `.git/info/exclude`, that gives this machine's hardware, its role, and the fleet layout
+  the shared `.gitignore`, that gives this machine's hardware, its role, and the fleet layout
   (macmini, thinkbook, amdserver). Datasets live on amdserver.
 
 ## Worklog
