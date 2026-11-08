@@ -222,3 +222,6 @@ __marimo__/
 # Data files
 /data
 /data/
+
+# Per-machine notes (each machine keeps its own copy)
+CURRENT_MACHINE.md
