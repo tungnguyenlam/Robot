@@ -50,3 +50,8 @@
 - Direct ThinkBook→amdserver SSH works; resumed existing migration in tmux `epic_migration`.
 - Confirmed rsync writing `.P02_108.MP4.*` on amdserver; independent destination MD5 and source cleanup remain queued.
 - P04 assignments on Mac and amdserver are unchanged; keep ThinkBook awake and online until cleanup completes.
+
+## 2026-11-08 - Mac mini evacuation completed
+- Server copies of all P04 source files and helper tools passed independent MD5 checks.
+- Resumed remaining P04 downloads on amdserver; removed verified local dataset/tool files.
+- Audit and manifests: `/hdd/Robot/migration-20261108/macmini/`.
