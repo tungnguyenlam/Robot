@@ -73,3 +73,7 @@
 - Tests: 11 pass on amdserver (`pytest -q`). A mixed batch of 4 HOI4D+EPIC clips at 1080p decode takes about 12 s
   (first batch). For training, `egograph export` downsized clips first.
 - Next: download Ego4D (needs LAB22_API_KEY); then Month 2 baseline wrappers in `egograph/extractors/`.
+## 2026-11-10 - Commit and push all changes
+- Committed all staged changes (47 files) with message "chore: commit all changes".
+- Pushed to origin/main after rebasing to incorporate remote updates.
+- Report: runs/commit-push-2026-11-10/report.md
