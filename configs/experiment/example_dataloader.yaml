@@ -1,0 +1,15 @@
+# Mixed HOI4D (3D ground truth) and EPIC (in-the-wild) clips. Used by
+# scripts/example_dataloader.py and tests/test_datasets.py.
+_base_: ../data/base.yaml
+name: example_dataloader
+data:
+  sources:
+    - dataset: hoi4d
+      require: [has_hand_pose, has_object_pose]
+      tags: {rigid: true}     # Month 1 focus: rigid objects (Mug, Bottle, Bowl, Kettle, Knife, ToyCar)
+      sampling: sliding
+      stride_s: 2.0
+      max_sequences: 50
+    - dataset: epic_kitchens
+      sampling: actions       # centre clips on narrated actions (hand-object interaction)
+      max_sequences: 5

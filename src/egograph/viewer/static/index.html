@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>egograph · dataset viewer</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="logo">◎</span> egograph <span class="dim">/ dataset viewer</span></div>
+    <nav id="dataset-tabs" class="tabs"></nav>
+    <div class="kbd-hint"><kbd>space</kbd> play <kbd>←</kbd><kbd>→</kbd> frame <kbd>⇧←</kbd><kbd>⇧→</kbd> 1 s <kbd>[</kbd><kbd>]</kbd> action</div>
+  </header>
+
+  <main class="layout">
+    <!-- ───────── sidebar: dataset summary + sequence browser ───────── -->
+    <aside class="sidebar">
+      <section id="dataset-card" class="card"></section>
+      <section class="card browser">
+        <input id="search" type="search" placeholder="Search id or tag…" autocomplete="off" />
+        <div id="filters" class="filters"></div>
+        <div id="seq-count" class="dim small"></div>
+        <ul id="seq-list" class="seq-list"></ul>
+        <button id="load-more" class="ghost" hidden>Load more</button>
+      </section>
+    </aside>
+
+    <!-- ───────── main: player ───────── -->
+    <section class="main">
+      <div id="empty" class="empty">
+        <h2>Select a sequence</h2>
+        <p class="dim">Videos stream from the data root. Overlays come from the same <code>EgoLoader</code> used in training.</p>
+      </div>
+
+      <div id="player" hidden>
+        <div class="seq-title">
+          <h2 id="seq-id"></h2>
+          <div id="seq-badges" class="badges"></div>
+        </div>
+
+        <div class="stage-wrap">
+          <div id="stage" class="stage">
+            <video id="video" preload="auto" playsinline muted></video>
+            <canvas id="overlay"></canvas>
+            <div id="action-now" class="action-now"></div>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="play" class="icon" title="Play/pause (space)">▶</button>
+          <button id="prev" class="icon" title="Previous frame">⏮</button>
+          <button id="next" class="icon" title="Next frame">⏭</button>
+          <select id="rate" title="Playback speed">
+            <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+            <option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
+          </select>
+          <div class="readout mono"><span id="frame-no">0</span> / <span id="frame-total">0</span> · <span id="time-no">0.00</span>s</div>
+          <div class="spacer"></div>
+          <div id="layers" class="layers"></div>
+        </div>
+
+        <div id="timeline" class="timeline">
+          <div id="tl-segments" class="tl-segments"></div>
+          <div id="tl-valid" class="tl-valid"></div>
+          <div id="tl-head" class="tl-head"></div>
+        </div>
+
+        <div class="panels">
+          <section class="card">
+            <h3>Metadata</h3>
+            <table id="meta-table" class="kv mono"></table>
+          </section>
+          <section class="card">
+            <h3>Camera trajectory <span class="dim small">top-down x/z, metres</span></h3>
+            <svg id="traj" class="traj" viewBox="0 0 300 220"></svg>
+            <div id="traj-note" class="dim small"></div>
+          </section>
+          <section class="card wide">
+            <div class="row">
+              <h3>Standard clip <span class="dim small">egoformat-v1, what the data loader yields</span></h3>
+              <div class="spacer"></div>
+              <label class="small">frames <input id="clip-num" type="number" value="8" min="1" max="32" /></label>
+              <label class="small">fps <input id="clip-fps" type="number" value="" placeholder="native" min="1" max="60" /></label>
+              <button id="clip-run">Load clip @ playhead</button>
+            </div>
+            <div id="clip-strip" class="strip"></div>
+            <div id="clip-info" class="clip-info mono small"></div>
+          </section>
+          <section class="card wide">
+            <h3>Actions <span id="act-count" class="dim small"></span></h3>
+            <ul id="act-list" class="act-list"></ul>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

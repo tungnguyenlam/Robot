@@ -21,3 +21,12 @@ tac WORKLOG.md | awk '/^## /{if(++n==2){print; exit}} {print}' | tac  # last 2 e
 sed -n '120,150p' WORKLOG.md                                         # one entry by line range
 grep -n -i 'projector' WORKLOG.md docs/worklog_archive/*.md | tail   # older history by keyword
 ```
+
+## Code
+
+- Package `egograph` (`src/egograph`); layout in `docs/ARCHITECTURE.md`, data schema in
+  `docs/DATA_FORMAT.md`. Data, GPU, and the `egograph` conda env are on amdserver: edit
+  anywhere, push with `scripts/sync_to_server.sh`, then run `pytest -q` there.
+- Dataset raw layouts are known only to `src/egograph/data/adapters/`; everything else uses
+  `Clip`/`Annotations`. Rebuild indexes (`egograph index`) after data changes.
+

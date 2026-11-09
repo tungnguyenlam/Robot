@@ -225,3 +225,15 @@ __marimo__/
 
 # Per-machine notes (each machine keeps its own copy)
 CURRENT_MACHINE.md
+
+# --- egograph ---
+# Run outputs: keep config.yaml / report.md / metrics.json tracked (WORKLOG links to them),
+# ignore heavy artifacts.
+runs/**/checkpoints/
+runs/**/frames/
+runs/**/*.pt
+runs/**/*.ckpt
+runs/**/*.npz
+runs/**/*.mp4
+# Locally exported standard-format clips
+exports/

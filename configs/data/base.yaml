@@ -1,0 +1,11 @@
+# Shared data defaults. Experiment configs inherit from this with `_base_`.
+seed: 0
+data:
+  clip_len: 16          # frames per clip
+  fps: 15               # resample every source to this rate (HOI4D is natively 15 fps)
+  with_frames: true
+  max_objects: 4        # objects per clip are padded to this count
+  transforms:
+    resize: 256         # short side in pixels; K and 2D labels are updated to match
+    center_crop: [256, 256]
+  adapter_kwargs: {}    # per dataset, e.g. {hoi4d: {mano: false}}

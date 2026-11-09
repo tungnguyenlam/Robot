@@ -55,3 +55,21 @@
 - Server copies of all P04 source files and helper tools passed independent MD5 checks.
 - Resumed remaining P04 downloads on amdserver; removed verified local dataset/tool files.
 - Audit and manifests: `/hdd/Robot/migration-20261108/macmini/`.
+
+## 2026-11-09 - Month 1 data pipeline: egograph package and dataset viewer
+- Added `src/egograph`: adapters for HOI4D, EPIC-100, and Ego4D, parsing into egoformat-v1
+  (`docs/DATA_FORMAT.md`). Also: frame-exact PyAV reader, K-aware transforms, torch `EgoClipDataset`,
+  `egograph export`, and a `PoseExtractor` interface for the Month 2 baselines. Layout: `docs/ARCHITECTURE.md`.
+- amdserver: extracted `HOI4D_release.zip` (2,973 videos), cloned EPIC-100 annotations into
+  `data/epic_kitchens/annotations`, and created the `egograph` conda env (a clone of stablehand: torch 2.14 + ROCm).
+- Indexes in `data/_index/`: HOI4D 2,973 seqs / 16.5 h (1,685 with MANO hands; all have obj pose,
+  camera, and actions); EPIC 156 videos / 22.2 h (P01–P05). Ego4D not downloaded.
+- HOI4D conventions measured, not assumed. Objects use intrinsic XYZ Euler and (l,w,h) dims, with
+  projected-box IoU 0.945 vs 0.71 for the next-best convention. MANO uses flat_hand_mean=True and the
+  original MANO_LEFT (no smplx shapedirs fix): reprojection 0.7 px right and 0.85 px left, vs 29–32 px otherwise.
+- Some HOI4D objpose files are zero-padded (`00000.json`); the adapter handles both naming styles.
+- Viewer: `scripts/viewer.sh start` serves http://100.121.118.8:8765 (Tailscale only). It shows video with
+  GT hand keypoints, MANO→2D, 3D/2D object boxes, the action timeline, the camera trajectory, and a standard-clip preview.
+- Tests: 11 pass on amdserver (`pytest -q`). A mixed batch of 4 HOI4D+EPIC clips at 1080p decode takes about 12 s
+  (first batch). For training, `egograph export` downsized clips first.
+- Next: download Ego4D (needs LAB22_API_KEY); then Month 2 baseline wrappers in `egograph/extractors/`.

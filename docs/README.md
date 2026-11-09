@@ -9,6 +9,11 @@ Welcome to the documentation for the project: **Learning dexterous robot manipul
   - Realistic ~100 GB working set downloads for each dataset.
   - Screenshots of final states before human intervention in [`images/`](images/).
 
+## Code
+- [**Data format (egoformat-v1)**](DATA_FORMAT.md): the standard hand-object format produced by all dataset adapters.
+- [**Architecture**](ARCHITECTURE.md): the `egograph` package layout and where later months plug in.
+- [**Experiments**](EXPERIMENTS.md): configs, run directories, and where to run.
+
 ## Research & Planning References
 - [Topic Plan](../user-work/TOPIC_PLAN.md): Month-by-month roadmap (Months 1–6).
 - [Execution Checklist](../user-work/EXECUTION.md): Immediate task tracking and baseline references.
