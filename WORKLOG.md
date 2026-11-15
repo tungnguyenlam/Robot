@@ -77,3 +77,13 @@
 - Committed all staged changes (47 files) with message "chore: commit all changes".
 - Pushed to origin/main after rebasing to incorporate remote updates.
 - Report: runs/commit-push-2026-11-10/report.md
+
+## 2026-11-13 - Upgrade dataset web viewer
+- Added Dataset Overview & Visual Gallery (`GET /api/dataset/<ds>/overview`, `/api/sequence/<ds>/<sid>/thumbnail.jpg`, `/api/sequences/random`) with clickable distribution charts, multi-word search, sorting, and normalized `hands`/`rigid` facets.
+- Added interactive 3D viewport (`viewer3d.js`, camera/world frames, hand skeletons, 3D object boxes, camera frustum/trajectory, hand-object proximity) and per-frame telemetry (MANO reprojection error, 3D coords, min hand-object distance).
+- Added stage pan/zoom, PNG snapshot export, finger-color & joint-id overlay toggles, zoomable drag-scrub timeline with action looping, action search/auto-follow, and `Standard clip` transform pixel/overlay verification (`resize`/`crop` preview).
+- Added `tests/test_viewer.py` (4 viewer test functions); `pytest -q`: 15 passed. Restarted `scripts/viewer.sh` on `http://100.121.118.8:8765`.
+
+## 2026-11-15 - Revert 2026-11-13 web viewer upgrade
+- Reverted `src/egograph/viewer/` (app.py, app.js, index.html, style.css) to HEAD and removed `viewer3d.js` and `tests/test_viewer.py`; the Gemini-written upgrade was broken.
+- The "Upgrade dataset web viewer" entry above no longer describes the code.
