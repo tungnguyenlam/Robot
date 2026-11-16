@@ -112,6 +112,12 @@
   Downloading with lab22 --parts full_scale --uid-file (log data/Ego4D/fho_download.log); then checksum
   verify + egograph index --dataset ego4d.
 
+## 2026-11-17 - viewer: label annotation flags, disable unavailable overlays
+- Trigger: the 4 unlabeled sidebar dots were misread (P01_02's yellow dot = actions, not pose); EPIC-KITCHENS has actions only.
+- Sidebar dots → lettered flags H/O/C/A with a legend; sequence badges coloured to match.
+- Overlay toggles with no data for the sequence are now disabled and struck through. An "only action labels" note is shown, the empty pose lane is hidden from the timeline, and the empty trajectory SVG is collapsed.
+- Fixed a stale `S.trajXY` that carried over between sequences. Files: `src/egograph/viewer/static/{app.js,index.html,style.css}`.
+
 ## 2026-11-17 - Uncommitted work wiped by a macmini sync; recovered
 - 00:37: `scripts/sync_to_server.sh` run from macmini (rsync --delete-after, .git excluded) replaced
   amdserver's working tree with macmini's, deleting all uncommitted 11-16/11-17 work. uv.lock lost too.
