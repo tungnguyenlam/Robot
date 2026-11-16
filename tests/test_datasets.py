@@ -78,3 +78,66 @@ def test_torch_dataset_batches(loader):
     T, S = cfg["data"]["clip_len"], cfg["data"]["transforms"]["resize"]
     assert b["frames"].shape == (2, T, 3, S, S)
     assert b["hand_joints_2d"].shape == (2, 2, T, 21, 2)
+
+
+# ---------------------------------------------------------------- v1.1 modalities on real data
+@require_index("hoi4d")
+def test_hoi4d_depth_seg_scene():
+    L = EgoLoader(modalities=["depth", "seg", "scene"])
+    idx = L.index("hoi4d")
+    m = next(x for x in idx.metas if {"depth", "hand_pose"} <= set(x.modalities))
+    c = L.load_clip("hoi4d", m.sequence_id, [150])
+    assert c.depth.shape == (1, m.height, m.width) and c.seg.shape == (1, m.height, m.width)
+    h = c.annotations.hands["right"] if c.annotations.hands["right"].valid[0] else c.annotations.hands["left"]
+    assert h.valid[0]
+    uv = np.round(h.joints_2d[0]).astype(int)
+    uv[:, 0] = uv[:, 0].clip(0, m.width - 1)
+    uv[:, 1] = uv[:, 1].clip(0, m.height - 1)
+    z = c.depth[0][uv[:, 1], uv[:, 0]]
+    # Depth at the 2D keypoints matches the 3D joint depth (pixel-aligned, metres).
+    assert abs(np.median(z[z > 0]) - np.median(h.joints_3d[0][:, 2])) < 0.08
+    assert (c.seg[0][uv[:, 1], uv[:, 0]] > 0).mean() > 0.5   # keypoints fall on a mask
+    # The scene cloud lives in the T_world_cam frame: projected into this view, it agrees with depth.
+    Tcw = np.linalg.inv(c.annotations.T_world_cam[0])
+    p = c.scene.xyz @ Tcw[:3, :3].T + Tcw[:3, 3]
+    p = p[p[:, 2] > 0.1]
+    u = (m.K[0, 0] * p[:, 0] / p[:, 2] + m.K[0, 2]).astype(int)
+    v = (m.K[1, 1] * p[:, 1] / p[:, 2] + m.K[1, 2]).astype(int)
+    ok = (u >= 0) & (u < m.width) & (v >= 0) & (v < m.height)
+    D = c.depth[0][v[ok], u[ok]]
+    good = D > 0
+    assert np.median(np.abs(D[good] - p[ok][good, 2])) < 0.05
+
+
+@require_index("epic_kitchens")
+def test_epic_audio_imu():
+    L = EgoLoader(modalities=["audio", "imu"])
+    idx = L.index("epic_kitchens")
+    m = next(x for x in idx.metas if "imu" in x.modalities)
+    c = L.load_clip("epic_kitchens", m.sequence_id, L.frames_at(m, 30.0, 8, 30))
+    ts = c.annotations.timestamps
+    span = ts[-1] - ts[0] + np.median(np.diff(ts))        # first frame to one period after the last
+    assert c.audio.shape == (round(span * 16000), 1) and c.audio_sr == 16000
+    imu = c.annotations.imu
+    assert imu.frame == "camera" and len(imu.t) > 20
+    v, ok = imu.at(c.annotations.timestamps)
+    assert ok.all() and 7 < np.linalg.norm(v[:, :3].mean(0)) < 12   # gravity dominates
+    assert v[:, 1].mean() < 0   # specific force points up = -y in the OpenCV frame
+
+
+@require_index("ego4d")
+def test_ego4d_fho_boxes():
+    from egograph.paths import cache_root
+    import json
+
+    L = EgoLoader(modalities=["rgb"])
+    idx = L.index("ego4d")
+    m = next(x for x in idx.metas if "hand_box" in x.modalities)
+    acts = json.loads((cache_root("ego4d") / "ann" / f"{m.sequence_id}.json").read_text())["actions"]
+    b = next(b for a in acts for b in a.get("boxes", []) if b["type"].endswith("_hand"))
+    c = L.load_clip("ego4d", m.sequence_id, [b["frame"] - 1, b["frame"], b["frame"] + 1], with_frames=False)
+    h = c.annotations.hands[b["type"].split("_")[0]]
+    np.testing.assert_allclose(h.bbox_2d[1], b["xyxy"], atol=1e-3)
+    assert np.isnan(h.bbox_2d[0]).all() and np.isnan(h.bbox_2d[2]).all()   # sparse: key frames only
+    x0, y0, x1, y1 = b["xyxy"]
+    assert 0 <= x0 < x1 <= m.width + 2 and 0 <= y0 < y1 <= m.height + 2

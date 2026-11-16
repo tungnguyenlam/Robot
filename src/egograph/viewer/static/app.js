@@ -20,16 +20,30 @@ const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)
 const segColor = (s) => `hsl(${hue(s.toLowerCase())} 55% 52%)`;
 const CHUNK = 300;
 
-const LAYERS = [
-  { key: "hands", label: "hand kps (GT 2D)", color: "var(--right)", on: true },
-  { key: "mano", label: "MANO → 2D", color: "var(--mano)", on: false },
-  { key: "box3d", label: "object 3D box", color: "var(--obj)", on: true },
-  { key: "bbox", label: "object 2D box", color: "#d6d6d6", on: false },
-  { key: "axes", label: "object axes", color: "#ff5d5d", on: false },
+// One definition of each annotation kind, used by the list flags, legend and badges.
+const KINDS = [
+  { key: "has_hand_pose", letter: "H", label: "hand pose", short: "hand", cls: "h" },
+  { key: "has_object_pose", letter: "O", label: "object pose", short: "object", cls: "o" },
+  { key: "has_camera_pose", letter: "C", label: "camera pose", short: "camera", cls: "c" },
+  { key: "has_actions", letter: "A", label: "actions", short: "actions", cls: "a" },
 ];
 
+// `needs` = sequence flag the overlay draws from; layers without that data are disabled.
+const LAYERS = [
+  { key: "hands", label: "hand kps (GT 2D)", color: "var(--right)", on: true, needs: "has_hand_pose" },
+  { key: "mano", label: "MANO → 2D", color: "var(--mano)", on: false, needs: "has_hand_pose" },
+  { key: "box3d", label: "object 3D box", color: "var(--obj)", on: true, needs: "has_object_pose" },
+  { key: "bbox", label: "object 2D box", color: "#d6d6d6", on: true, mod: "object_box" },
+  { key: "handbox", label: "hand 2D box", color: "#ffd24c", on: true, mod: "hand_box" },
+  { key: "gaze", label: "gaze", color: "#ff4cf0", on: true, mod: "gaze" },
+  { key: "axes", label: "object axes", color: "#ff5d5d", on: false, needs: "has_object_pose" },
+  { key: "depth", label: "depth (paused)", color: "#3be0c0", on: false, mod: "depth" },
+  { key: "seg", label: "masks (paused)", color: "#b04cff", on: false, mod: "seg" },
+];
+const hasMod = (m, k) => (m.modalities || []).includes(k);
+
 const S = {
-  datasets: [], ds: null, q: "", require: new Set(), tags: {}, offset: 0, total: 0,
+  datasets: [], ds: null, q: "", require: new Set(), mods: new Set(), tags: {}, offset: 0, total: 0,
   seq: null, frame: 0, chunks: new Map(), pending: new Set(), layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
 };
 
@@ -54,8 +68,8 @@ function renderTabs() {
 
 async function selectDataset(name, resetHash = true) {
   S.ds = S.datasets.find((d) => d.name === name);
-  S.q = ""; S.require.clear(); S.tags = {}; $("#search").value = "";
-  renderTabs(); renderDatasetCard(); renderFilters();
+  S.q = ""; S.require.clear(); S.mods.clear(); S.tags = {}; $("#search").value = "";
+  renderTabs(); renderDatasetCard(); renderFilters(); renderLegend();
   if (resetHash && S.seq?.meta.dataset !== name) history.replaceState(null, "", `#${name}`);
   await loadSequences(true);
 }
@@ -88,6 +102,14 @@ function renderFilters() {
       onclick: (e) => { S.require.has(k) ? S.require.delete(k) : S.require.add(k); e.target.classList.toggle("on"); loadSequences(true); },
     }, label));
   }
+  // Modality chips: only the ones that actually split this dataset.
+  for (const [k, n] of S.ds.modalities || []) {
+    if (n <= 0 || n >= S.ds.sequences || ["hand_pose", "object_pose", "camera_pose", "actions"].includes(k)) continue;
+    box.append(el("button", {
+      class: `chip mod ${S.mods.has(k) ? "on" : ""}`, title: `${n} sequences have ${k}`,
+      onclick: (e) => { S.mods.has(k) ? S.mods.delete(k) : S.mods.add(k); e.target.classList.toggle("on"); loadSequences(true); },
+    }, k));
+  }
   for (const [tag, values] of Object.entries(S.ds.facets || {})) {
     if (values.length < 2) continue;
     const sel = el("select", { onchange: (e) => { e.target.value ? (S.tags[tag] = e.target.value) : delete S.tags[tag]; loadSequences(true); } },
@@ -108,6 +130,7 @@ async function loadSequences(reset) {
   const p = new URLSearchParams({ dataset: S.ds.name, offset: S.offset, limit: 150 });
   if (S.q) p.set("q", S.q);
   S.require.forEach((r) => p.append("require", r));
+  S.mods.forEach((r) => p.append("modality", r));
   Object.entries(S.tags).forEach(([k, v]) => p.append("tag", `${k}:${v}`));
   const res = await api(`/api/sequences?${p}`);
   S.total = res.total; S.offset += res.items.length;
@@ -119,15 +142,19 @@ async function loadSequences(reset) {
 
 function seqItem(m) {
   const t = m.tags || {};
-  const sub = [t.category_name || t.participant, `${fmt(m.duration_s, 1)}s`, t.num_actions !== undefined ? `${t.num_actions} acts` : null, t.hands?.length ? t.hands.join("+") : null].filter(Boolean);
+  const sub = [t.category_name || t.participant || t.scenario, `${fmt(m.duration_s, 1)}s`, t.num_actions !== undefined ? `${t.num_actions} acts` : null, t.hands?.length ? t.hands.join("+") : null].filter(Boolean);
   return el("li", { "data-id": m.sequence_id, onclick: () => openSequence(m.dataset, m.sequence_id) },
     el("div", { class: "sid" }, m.sequence_id),
     el("div", { class: "sub" }, sub.join(" · "),
-      el("span", { class: "dots" },
-        el("i", { class: `dot ${m.has_hand_pose ? "h" : ""}`, title: "hand pose" }),
-        el("i", { class: `dot ${m.has_object_pose ? "o" : ""}`, title: "object pose" }),
-        el("i", { class: `dot ${m.has_camera_pose ? "c" : ""}`, title: "camera pose" }),
-        el("i", { class: `dot ${m.has_actions ? "a" : ""}`, title: "actions" }))));
+      flagRow(m)));
+}
+function flagRow(m) {
+  return el("span", { class: "flags", title: KINDS.map((k) => `${k.label}: ${m[k.key] ? "yes" : "no"}`).join("\n") },
+    KINDS.map((k) => el("i", { class: `flag ${m[k.key] ? k.cls : ""}` }, k.letter)));
+}
+function renderLegend() {
+  $("#flag-legend").replaceChildren(...KINDS.map((k) =>
+    el("span", { title: k.label }, el("i", { class: `flag ${k.cls}` }, k.letter), k.short)));
 }
 function markActive() {
   document.querySelectorAll("#seq-list li").forEach((li) => li.classList.toggle("active", li.dataset.id === S.seq?.meta.sequence_id));
@@ -141,9 +168,15 @@ async function openSequence(dataset, sid, startFrame = 0) {
   const m = seq.meta;
   $("#empty").hidden = true; $("#player").hidden = false;
   $("#seq-id").textContent = m.sequence_id;
-  $("#seq-badges").replaceChildren(...[
-    ["hand pose", m.has_hand_pose], ["object pose", m.has_object_pose], ["camera pose", m.has_camera_pose],
-    ["actions", m.has_actions], ["intrinsics", !!m.intrinsics]].map(([k, v]) => el("span", { class: `badge ${v ? "yes" : ""}` }, `${v ? "✓" : "✗"} ${k}`)));
+  const ALL = ["rgb", "depth", "seg", "audio", "imu", "gaze", "scene", "intrinsics", "camera_pose",
+    "hand_pose", "hand_box", "object_pose", "object_box", "contact", "actions"];
+  const mods = new Set(m.modalities?.length ? m.modalities : [
+    "rgb", m.has_hand_pose && "hand_pose", m.has_object_pose && "object_pose", m.has_camera_pose && "camera_pose",
+    m.has_actions && "actions", m.intrinsics && "intrinsics"].filter(Boolean));
+  $("#seq-badges").replaceChildren(...ALL.map((k) => el("span", { class: `badge ${mods.has(k) ? "yes" : ""}` }, `${mods.has(k) ? "✓" : "✗"} ${k.replace("_", " ")}`)));
+  S.overlayKey = null; $("#mod-img").hidden = true;
+  renderImu();
+  updateLayers(m);
   $("#stage").style.aspectRatio = `${m.width} / ${m.height}`;
   const v = $("#video");
   v.src = seq.video_url;
@@ -184,7 +217,8 @@ function renderValidity() {
     for (let i = 0; i < ch.end - ch.start; i++) {
       const x = ((ch.start + i) / n) * 1200, w = Math.max(1200 / n, 1);
       if (ch.objects.some((o) => o.valid[i])) { ctx.fillStyle = "#a6e35a"; ctx.fillRect(x, 4, w, 3); }
-      const l = ch.hands.left?.valid[i], r = ch.hands.right?.valid[i];
+      const l = ch.hands.left?.valid[i] || ch.hands.left?.bbox_2d?.[i]?.[0] != null,
+        r = ch.hands.right?.valid[i] || ch.hands.right?.bbox_2d?.[i]?.[0] != null;
       if (l || r) { ctx.fillStyle = r ? "#ff8a4c" : "#4cc3ff"; ctx.fillRect(x, 0, w, 3); }
     }
   }
@@ -201,8 +235,9 @@ function renderActions() {
 
 function renderTraj() {
   const svg = $("#traj"), traj = S.seq.camera_trajectory;
-  svg.replaceChildren();
-  if (!traj || !traj.length) { $("#traj-note").textContent = "No camera poses for this sequence (run SLAM in Month 2)."; return; }
+  svg.replaceChildren(); S.trajXY = null;
+  svg.hidden = !traj || !traj.length;
+  if (svg.hidden) { $("#traj-note").textContent = "No camera poses for this sequence (run SLAM in Month 2)."; return; }
   const xs = traj.map((p) => p[1]), zs = traj.map((p) => p[3]);
   const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)];
   const span = Math.max(x1 - x0, z1 - z0, 0.05), W = 300, H = 220, pad = 18, s = (Math.min(W, H) - 2 * pad) / span;
@@ -225,7 +260,7 @@ function renderTraj() {
 async function ensureChunk(frame) {
   if (!S.seq) return;
   const m = S.seq.meta;
-  if (!(m.has_hand_pose || m.has_object_pose)) return;
+  if (!(m.has_hand_pose || m.has_object_pose || ["hand_box", "object_box", "gaze"].some((k) => hasMod(m, k)))) return;
   const start = Math.floor(frame / CHUNK) * CHUNK, key = `${m.sequence_id}:${start}`;
   if (S.chunks.has(start) || S.pending.has(key)) return;
   S.pending.add(key);
@@ -237,10 +272,28 @@ async function ensureChunk(frame) {
 
 // ─────────────────────────────── drawing ───────────────────────────────
 function buildLayers() {
+  // depth/seg toggles redraw the paused overlay immediately.
   $("#layers").replaceChildren(...LAYERS.map((l) => el("button", {
-    class: `layer ${S.layers[l.key] ? "" : "off"}`,
+    class: `layer ${S.layers[l.key] ? "" : "off"}`, "data-key": l.key,
     onclick: (e) => { S.layers[l.key] = !S.layers[l.key]; e.currentTarget.classList.toggle("off"); draw(); },
   }, el("i", { style: `background:${l.color}` }), l.label)));
+  if (S.seq) updateLayers(S.seq.meta);
+}
+function updateLayers(m) {
+  // Grey out overlays this sequence has no data for, and say what *is* shown.
+  for (const l of LAYERS) {
+    const b = document.querySelector(`#layers [data-key="${l.key}"]`);
+    if (!b) continue;
+    // `needs` = a has_* flag; `mod` = a modality name from the index (v1.1).
+    const ok = l.needs ? !!m[l.needs] : l.mod ? (m.modalities || []).includes(l.mod) : true;
+    b.disabled = !ok; b.classList.toggle("na", !ok);
+    b.title = ok ? "" : `No ${(l.needs ? l.needs.slice(4) : l.mod).replace("_", " ")} in this sequence`;
+  }
+  const pose = m.has_hand_pose || m.has_object_pose || (m.modalities || []).some((k) => ["hand_box", "object_box", "gaze"].includes(k));
+  $("#overlay-note").textContent = pose ? "" : m.has_actions
+    ? "No pose annotations: only action labels (top-left + timeline)"
+    : "No annotations for this sequence";
+  $("#timeline").classList.toggle("no-pose", !pose);
 }
 
 function draw() {
@@ -262,6 +315,8 @@ function draw() {
   document.querySelectorAll("#act-list li").forEach((li) => {
     const a = S.seq.actions[li.dataset.i]; li.classList.toggle("cur", a.start_s <= t && t <= a.end_s);
   });
+  drawImuHead(t);
+  updateModImage(f);
   if (S.trajXY) {
     const tr = S.seq.camera_trajectory, k = tr.findIndex((p) => p[0] >= f);
     const p = S.trajXY[k < 0 ? tr.length - 1 : k]; const d = $("#traj-dot");
@@ -299,11 +354,76 @@ function draw() {
     }
   }
   for (const [side, h] of Object.entries(ch.hands)) {
-    if (!h.valid[i]) continue;
     const color = side === "left" ? "#4cc3ff" : "#ff8a4c";
+    const hb = h.bbox_2d?.[i];
+    if (S.layers.handbox && hb && hb[0] !== null) {
+      const [x0, y0, x1, y1] = hb.map((x) => x * s);
+      ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+      label(ctx, `${side} hand`, [x0, y0 - 6 * dpr], color, dpr);
+    }
+    if (!h.valid[i]) continue;
     if (S.layers.hands) skeleton(ctx, h.joints_2d[i].map(P), color, lw, dpr);
     if (S.layers.mano && h.mano_2d && h.mano_2d[i][0][0] !== null) skeleton(ctx, h.mano_2d[i].map(P), "#f05bd8", lw * 0.7, dpr * 0.7);
   }
+  drawGaze(ctx, ch, i, s, dpr);
+}
+
+function drawGaze(ctx, ch, i, s, dpr) {
+  const g = ch.gaze_2d?.[i];
+  if (!S.layers.gaze || !g || g[0] === null) return;
+  ctx.strokeStyle = "#ff4cf0"; ctx.lineWidth = 2.5 * dpr;
+  ctx.beginPath(); ctx.arc(g[0] * s, g[1] * s, 14 * dpr, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(g[0] * s, g[1] * s, 3 * dpr, 0, 7); ctx.fillStyle = "#ff4cf0"; ctx.fill();
+}
+
+// Depth / mask overlay: one PNG per frame from the server, only while paused (decoding a
+// 1080p 16-bit depth frame per video frame would not keep up with playback).
+function updateModImage(f) {
+  const img = $("#mod-img"), m = S.seq.meta, v = $("#video");
+  const kind = S.layers.seg && hasMod(m, "seg") ? "seg" : S.layers.depth && hasMod(m, "depth") ? "depth" : null;
+  if (!kind || !v.paused) { img.hidden = true; S.overlayKey = null; return; }
+  const key = `${m.sequence_id}:${kind}:${f}`;
+  if (S.overlayKey === key) return;
+  S.overlayKey = key;
+  clearTimeout(S.overlayTimer);
+  S.overlayTimer = setTimeout(() => {
+    img.onload = () => { if (S.overlayKey === key) img.hidden = false; };
+    img.src = `/api/modality/${m.dataset}/${encodeURIComponent(m.sequence_id)}/${kind}/${f}.png?w=960`;
+  }, 120);
+}
+
+// IMU panel: accelerometer (top) and gyroscope (bottom), bin-averaged over the sequence.
+async function renderImu() {
+  const card = $("#imu-card"), m = S.seq.meta;
+  S.imu = null;
+  if (!hasMod(m, "imu")) { card.hidden = true; return; }
+  card.hidden = false;
+  $("#imu-note").textContent = "loading (the first open of an EPIC video parses its GoPro telemetry)…";
+  $("#imu-plot").getContext("2d").clearRect(0, 0, 1e4, 1e4);
+  try {
+    const d = await api(`/api/sequence/${m.dataset}/${encodeURIComponent(m.sequence_id)}/imu?points=1200`);
+    if (S.seq?.meta.sequence_id !== m.sequence_id) return;
+    S.imu = d;
+    $("#imu-note").textContent = d.t.length ? `frame: ${d.frame} · accel m/s² (top) · gyro rad/s (bottom) · x red, y green, z blue` : "empty";
+    drawImuHead(S.frame / m.fps);
+  } catch (e) { $("#imu-note").textContent = String(e); }
+}
+function drawImuHead(t) {
+  const d = S.imu, cv = $("#imu-plot");
+  if (!d || !d.t.length || cv.closest("[hidden]")) return;
+  const W = (cv.width = cv.clientWidth * (window.devicePixelRatio || 1)), H = (cv.height = 160 * (window.devicePixelRatio || 1));
+  const ctx = cv.getContext("2d"), dur = S.seq.meta.duration_s || d.t[d.t.length - 1];
+  const X = (tt) => (tt / dur) * W;
+  const plot = (arr, y0, h) => {
+    const vals = arr.flat().filter((x) => x !== null), lo = Math.min(...vals), hi = Math.max(...vals), sp = hi - lo || 1;
+    ["#ff5d5d", "#5dff7a", "#5d8bff"].forEach((c, k) => {
+      ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.beginPath(); let pen = false;
+      arr.forEach((v, j) => { if (v[k] === null) { pen = false; return; } const y = y0 + h - ((v[k] - lo) / sp) * h; pen ? ctx.lineTo(X(d.t[j]), y) : ctx.moveTo(X(d.t[j]), y); pen = true; });
+      ctx.stroke();
+    });
+  };
+  plot(d.accel, 2, H / 2 - 6); plot(d.gyro, H / 2 + 4, H / 2 - 6);
+  ctx.strokeStyle = "#e8b04a"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(X(t), 0); ctx.lineTo(X(t), H); ctx.stroke();
 }
 
 function skeleton(ctx, pts, color, lw, dpr) {
@@ -329,7 +449,7 @@ function bindPlayer() {
   else { const loop = () => { S.frame = Math.round(v.currentTime * fps()); draw(); requestAnimationFrame(loop); }; loop(); }
   v.addEventListener("seeked", () => { S.frame = Math.round(v.currentTime * fps() - 0.5); draw(); });
   v.addEventListener("play", () => ($("#play").textContent = "❚❚"));
-  v.addEventListener("pause", () => ($("#play").textContent = "▶"));
+  v.addEventListener("pause", () => { $("#play").textContent = "▶"; draw(); });
   $("#play").onclick = () => (v.paused ? v.play() : v.pause());
   $("#prev").onclick = () => step(-1);
   $("#next").onclick = () => step(1);

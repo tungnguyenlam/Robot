@@ -8,6 +8,9 @@ Layout under ``$EGO_DATA_ROOT/HOI4D`` (as downloaded and extracted on amdserver)
     HOI4D_annotations/<seq>/3Dseg/output.log         # camera trajectory (Open3D .log)
     Hand_pose/handpose_{left,right}_hand/<seq>/<frame>.pickle   # MANO poseCoeff/beta/trans/kps2D
     camera_params/<ZY...>/intrin.npy                 # 3x3 K per capture device
+    HOI4D_depth_video/<seq>/align_depth/depth_video.avi   # FFV1 gray16le, mm, registered to RGB
+    HOI4D_annotations/<seq>/2Dseg/{mask,shift_mask}/<frame:05d>.png   # 2D instance masks
+    HOI4D_annotations/<seq>/3Dseg/label.pcd           # labelled static point cloud (world frame)
 
 ``<seq>`` is ``ZY2021080000x/H?/C?/N?/S?/s?/T?``: device / human / category / object
 instance / scene / layout / task. The sequence id replaces '/' with '-'.
@@ -21,6 +24,16 @@ Conventions, checked against the data with tests/test_hoi4d_conventions.py (2026
   the camera frame. ``kps2D`` is in the 21-joint OpenPose order. Projected MANO joints are
   0.7 px (right) and 0.85 px (left) from kps2D (median). With flat_hand_mean=False the error
   is 32 px; with the smplx left-shapedirs fix it is 29 px.
+* depth is uint16 millimetres, 1920x1080 at 15 fps, pixel-aligned with the RGB video: at
+  the projected object centre the depth is 0.909 m for an object whose centre is 0.921 m
+  away (the visible surface is in front of the centre). 0 means no reading.
+* 2D masks are PNGs, either palette ("mask") or RGB ("shift_mask", ~2/3 of sequences), both
+  using the PASCAL-VOC colour map. We return the VOC index as the instance id. The ids are
+  per sequence, not global classes: over 1,000 sampled frames the right hand is id 2
+  (0,128,0), the left hand id 3 (128,128,0) in two-hand sequences, and the main object id 1
+  (128,0,0), but articulated parts also use 3, 4 (0,0,128), and 5 (128,0,128).
+* ``3Dseg/label.pcd`` is ASCII with fields x y z rgb label ID, in the same world frame as
+  ``3Dseg/output.log`` (the first reconstructed camera).
 """
 
 from __future__ import annotations
@@ -38,7 +51,7 @@ from scipy.spatial.transform import Rotation
 
 from egograph.data.adapters.base import DatasetAdapter, overlapping, register
 from egograph.data.geometry import make_T
-from egograph.data.schema import ActionSegment, Annotations, ObjectTrack, SequenceMeta
+from egograph.data.schema import ActionSegment, Annotations, ObjectTrack, ScenePoints, SequenceMeta
 from egograph.data.video import probe
 
 CATEGORIES = {
@@ -50,6 +63,55 @@ CATEGORIES = {
 RIGID = {"ToyCar", "Mug", "Bottle", "Bowl", "Kettle", "Knife"}
 
 HOI4D_FPS = 15.0
+
+
+def voc_palette(n: int = 256) -> np.ndarray:
+    """The PASCAL-VOC colour map: (n, 3) uint8, index -> RGB."""
+    pal = np.zeros((n, 3), np.uint8)
+    for i in range(n):
+        c, r, g, b = i, 0, 0, 0
+        for j in range(8):
+            r |= ((c >> 0) & 1) << (7 - j)
+            g |= ((c >> 1) & 1) << (7 - j)
+            b |= ((c >> 2) & 1) << (7 - j)
+            c >>= 3
+        pal[i] = (r, g, b)
+    return pal
+
+
+_VOC_LUT = {tuple(int(x) for x in c): i for i, c in enumerate(voc_palette())}
+
+
+def mask_ids(path: Path) -> np.ndarray:
+    """Read a HOI4D 2D mask as (H, W) uint8 VOC indices, whether it is a palette or RGB PNG."""
+    from PIL import Image
+
+    im = Image.open(path)
+    if im.mode == "P":
+        return np.asarray(im, dtype=np.uint8)
+    rgb = np.asarray(im.convert("RGB"))
+    key = (rgb[..., 0].astype(np.int32) << 16) | (rgb[..., 1].astype(np.int32) << 8) | rgb[..., 2]
+    out = np.zeros(key.shape, np.uint8)
+    for k in np.unique(key):
+        idx = _VOC_LUT.get(((k >> 16) & 255, (k >> 8) & 255, k & 255), 255)  # 255: colour outside the map
+        out[key == k] = idx
+    return out
+
+
+def read_pcd(path: Path) -> dict[str, np.ndarray]:
+    """Minimal PCD reader for HOI4D's ASCII clouds. Returns one array per field."""
+    with path.open("rb") as f:
+        fields: list[str] = []
+        while True:
+            line = f.readline().decode("ascii", "replace").strip()
+            if line.startswith("FIELDS"):
+                fields = line.split()[1:]
+            if line.startswith("DATA"):
+                if line.split()[1] != "ascii":
+                    raise ValueError(f"{path}: only ASCII PCD is supported")
+                break
+        data = np.loadtxt(f, dtype=np.float64, ndmin=2)
+    return {name: data[:, i] for i, name in enumerate(fields)}
 
 
 def parse_open3d_log(path: Path) -> dict[int, np.ndarray]:
@@ -90,6 +152,16 @@ class HOI4DAdapter(DatasetAdapter):
     def _hand_dir(self, meta: SequenceMeta, side: str) -> Path:
         return self.root / "Hand_pose" / f"handpose_{side}_hand" / self._rel(meta)
 
+    def _depth_path(self, rel: str) -> Path:
+        return self.root / "HOI4D_depth_video" / rel / "align_depth" / "depth_video.avi"
+
+    def _seg_dir(self, rel: str) -> Path | None:
+        for kind in ("mask", "shift_mask"):
+            d = self.root / "HOI4D_annotations" / rel / "2Dseg" / kind
+            if d.is_dir():
+                return d
+        return None
+
     # ---- discovery ---------------------------------------------------------------------
     def status(self) -> dict:
         st = super().status()
@@ -122,13 +194,23 @@ class HOI4DAdapter(DatasetAdapter):
         hand = [self.root / "Hand_pose" / f"handpose_{s}_hand" / rel for s in ("left", "right")]
         K_path = self.root / "camera_params" / device / "intrin.npy"
         cname = CATEGORIES.get(cat, cat)
+        has_hand = any(h.is_dir() for h in hand)
+        flags = {
+            "rgb": True, "intrinsics": K_path.exists(), "hand_pose": has_hand,
+            "object_pose": (ann / "objpose").is_dir(), "object_box": (ann / "objpose").is_dir(),
+            "camera_pose": (ann / "3Dseg" / "output.log").exists(),
+            "actions": (ann / "action" / "color.json").exists(),
+            "depth": self._depth_path(rel).exists(), "seg": self._seg_dir(rel) is not None,
+            "scene": (ann / "3Dseg" / "label.pcd").exists(),
+        }
+        flags["contact"] = flags["hand_pose"] and flags["object_pose"]
         return SequenceMeta(
             dataset=self.name, sequence_id=rel.replace("/", "-"),
             video_path=str(video.relative_to(self.root)),
             fps=vi.fps or HOI4D_FPS, num_frames=vi.num_frames, width=vi.width, height=vi.height,
             duration_s=vi.duration_s,
             intrinsics=np.load(K_path).tolist() if K_path.exists() else None,
-            has_hand_pose=any(h.is_dir() for h in hand),
+            has_hand_pose=has_hand,
             has_object_pose=(ann / "objpose").is_dir(),
             has_camera_pose=(ann / "3Dseg" / "output.log").exists(),
             has_actions=(ann / "action" / "color.json").exists(),
@@ -136,6 +218,7 @@ class HOI4DAdapter(DatasetAdapter):
                   "category_name": cname, "rigid": cname in RIGID, "instance": inst,
                   "scene": scene, "layout": layout, "task": task,
                   "hands": [s for s, h in zip(("left", "right"), hand) if h.is_dir()]},
+            modalities=[k for k, v in flags.items() if v],
         )
 
     def scan(self) -> Iterator[SequenceMeta]:
@@ -150,6 +233,30 @@ class HOI4DAdapter(DatasetAdapter):
 
     def camera_poses(self, meta: SequenceMeta) -> dict[int, np.ndarray]:
         return _load_cam_log(str(self._ann(meta) / "3Dseg" / "output.log"))
+
+    # ---- dense modalities ----------------------------------------------------------------
+    def load_depth(self, meta: SequenceMeta, frame_indices) -> np.ndarray | None:
+        p = self._depth_path(self._rel(meta))
+        if not p.exists():
+            return None
+        from egograph.data.video import VideoReader
+
+        with VideoReader(p, pixel_format="gray16le") as vr:
+            return vr.read(np.asarray(frame_indices, np.int64)).astype(np.float32) / 1000.0
+
+    def load_seg(self, meta: SequenceMeta, frame_indices) -> np.ndarray | None:
+        d = self._seg_dir(self._rel(meta))
+        if d is None:
+            return None
+        out = np.zeros((len(frame_indices), meta.height, meta.width), np.uint8)
+        for t, i in enumerate(frame_indices):
+            p = d / f"{int(i):05d}.png"
+            if p.exists():
+                out[t] = mask_ids(p)
+        return out
+
+    def load_scene(self, meta: SequenceMeta) -> ScenePoints | None:
+        return _load_scene(str(self._ann(meta) / "3Dseg" / "label.pcd"))
 
     def _mano_layer(self):
         if self._mano is None and self._want_mano is not False:
@@ -241,7 +348,11 @@ def _load_actions(path: str) -> list[ActionSegment]:
     out = []
     for e in events:
         label = e.get("event") or e.get("label") or "?"
-        out.append(ActionSegment(float(e["startTime"]), float(e["endTime"]), label, verb=label.lower()))
+        # 2,955 files use startTime/endTime; 17 use the "markResult" layout with hdTimeStart/hdTimeEnd.
+        start, end = e.get("startTime", e.get("hdTimeStart")), e.get("endTime", e.get("hdTimeEnd"))
+        if start is None or end is None:
+            continue
+        out.append(ActionSegment(float(start), float(end), label, verb=label.lower()))
     return sorted(out, key=lambda a: a.start_s)
 
 
@@ -249,3 +360,18 @@ def _load_actions(path: str) -> list[ActionSegment]:
 def _load_cam_log(path: str) -> dict[int, np.ndarray]:
     p = Path(path)
     return parse_open3d_log(p) if p.exists() else {}
+
+
+@lru_cache(maxsize=8)
+def _load_scene(path: str) -> ScenePoints | None:
+    p = Path(path)
+    if not p.exists():
+        return None
+    f = read_pcd(p)
+    rgb = f["rgb"].astype(np.uint32)  # packed 0x00RRGGBB
+    return ScenePoints(
+        xyz=np.stack([f["x"], f["y"], f["z"]], 1).astype(np.float32),
+        rgb=np.stack([(rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255], 1).astype(np.uint8),
+        label=f.get("label", np.full(len(rgb), -1)).astype(np.int32),
+        instance=f["ID"].astype(np.int32) if "ID" in f else None,
+    )

@@ -1,0 +1,22 @@
+# Every modality the core papers use, from all three datasets in one batch. Each source fills
+# what it has; the rest is zero with *_valid False (see docs/MODALITIES.md).
+#   python scripts/example_dataloader.py configs/experiment/all_modalities.yaml
+_base_: ../data/base.yaml
+name: all_modalities
+data:
+  modalities: [rgb, depth, seg, audio, imu, gaze, scene, contact]
+  sources:
+    - dataset: hoi4d          # depth, masks, scene cloud, 3D hands/objects, contact proxy
+      require: [has_hand_pose, has_object_pose]
+      require_modalities: [depth]
+      tags: {rigid: true}
+      stride_s: 2.0
+      max_sequences: 20
+    - dataset: epic_kitchens  # audio, GoPro IMU in the camera frame
+      require_modalities: [imu]
+      sampling: actions
+      max_sequences: 3
+    - dataset: ego4d          # audio, IMU (device frame), FHO hand/object boxes, narrations
+      require_modalities: [hand_box]
+      sampling: actions
+      max_sequences: 3

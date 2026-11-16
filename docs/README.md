@@ -10,7 +10,8 @@ Welcome to the documentation for the project: **Learning dexterous robot manipul
   - Screenshots of final states before human intervention in [`images/`](images/).
 
 ## Code
-- [**Data format (egoformat-v1)**](DATA_FORMAT.md): the standard hand-object format produced by all dataset adapters.
+- [**Data format (egoformat-v1.1)**](DATA_FORMAT.md): the standard hand-object format produced by all dataset adapters.
+- [**Modalities**](MODALITIES.md): every modality the core papers use (depth, masks, audio, IMU, gaze, scene cloud, contact, …), which dataset has it, how it was checked, and the tensor keys.
 - [**Architecture**](ARCHITECTURE.md): the `egograph` package layout and where later months plug in.
 - [**Experiments**](EXPERIMENTS.md): configs, run directories, and where to run.
 

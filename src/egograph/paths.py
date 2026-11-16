@@ -3,6 +3,8 @@ so the same code runs on amdserver, the thinkbook, and Colab or Kaggle.
 
     EGO_DATA_ROOT   raw datasets (default: <repo>/data, a symlink to /hdd/Robot/data on amdserver)
     EGO_INDEX_ROOT  cached sequence indexes (default: $EGO_DATA_ROOT/_index)
+    EGO_CACHE_ROOT  per-sequence caches derived from raw files, e.g. parsed IMU
+                    (default: $EGO_INDEX_ROOT/cache)
     EGO_MANO_DIR    folder holding MANO_RIGHT.pkl and MANO_LEFT.pkl
     EGO_RUNS_ROOT   experiment outputs (default: <repo>/runs)
 """
@@ -26,6 +28,11 @@ def data_root() -> Path:
 
 def index_root() -> Path:
     return _env_path("EGO_INDEX_ROOT", data_root() / "_index")
+
+
+def cache_root(dataset: str | None = None) -> Path:
+    root = _env_path("EGO_CACHE_ROOT", index_root() / "cache")
+    return root / dataset if dataset else root
 
 
 def runs_root() -> Path:

@@ -3,6 +3,11 @@
 ``sample_windows`` turns indexes into a deterministic list of clip windows, either with a
 sliding window or centred on annotated actions. ``EgoLoader.load_window`` decodes one window.
 The torch ``EgoClipDataset`` (in ``torch_dataset.py``) wraps both.
+
+Labels (hands, objects, camera, actions) are always loaded. Other modalities are loaded
+only when listed in ``EgoLoader.modalities`` and present in the sequence:
+
+    loader = EgoLoader(modalities=["rgb", "depth", "seg", "audio", "imu", "gaze", "scene"])
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import numpy as np
 
 from egograph.data.adapters import DatasetAdapter, get_adapter
 from egograph.data.index import SequenceIndex
+from egograph.data.modalities import check
 from egograph.data.schema import Clip, SequenceMeta
 from egograph.data.video import VideoReader
 
@@ -76,8 +82,14 @@ class EgoLoader:
 
     transform: Callable[[Clip], Clip] | None = None
     adapter_kwargs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    modalities: Iterable[str] = ("rgb",)   # on-request modalities to load (see egograph.data.modalities)
+    audio_sr: int = 16000
+    audio_mono: bool = True
     _adapters: dict[str, DatasetAdapter] = field(default_factory=dict, init=False, repr=False)
     _indexes: dict[str, SequenceIndex] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.modalities = check(self.modalities)
 
     def adapter(self, dataset: str) -> DatasetAdapter:
         if dataset not in self._adapters:
@@ -95,16 +107,41 @@ class EgoLoader:
     frames_at = staticmethod(frame_indices_at)
 
     def load_clip(self, dataset: str, sequence_id: str, frame_indices: Iterable[int],
-                  with_frames: bool = True) -> Clip:
+                  with_frames: bool | None = None, modalities: Iterable[str] | None = None) -> Clip:
+        """Load one clip. ``modalities`` overrides the loader's list for this call;
+        ``with_frames=False`` drops "rgb" (kept for backward compatibility)."""
         meta = self.meta(dataset, sequence_id)
         ad = self.adapter(dataset)
         fi = np.asarray(list(frame_indices), dtype=np.int64)
+        want = check(modalities) if modalities is not None else set(self.modalities)
+        if with_frames is not None:
+            want = want | {"rgb"} if with_frames else want - {"rgb"}
         frames = None
-        if with_frames:
+        if "rgb" in want:
             with VideoReader(ad.video_path(meta)) as vr:
                 frames = vr.read(fi)
-        clip = Clip(meta=meta, frames=frames, K=meta.K, annotations=ad.load_annotations(meta, fi))
+        ann = ad.load_annotations(meta, fi)
+        clip = Clip(meta=meta, frames=frames, K=meta.K, annotations=ann)
+        has = set(meta.modalities)
+        # The clip spans [first frame, last frame + one frame period) on the video timeline.
+        t0 = float(ann.timestamps[0]) if len(fi) else 0.0
+        step = float(np.median(np.diff(ann.timestamps))) if len(fi) > 1 else 1.0 / meta.fps
+        t1 = float(ann.timestamps[-1]) + step if len(fi) else 0.0
+        if "depth" in want and "depth" in has:
+            clip.depth = ad.load_depth(meta, fi)
+        if "seg" in want and "seg" in has:
+            clip.seg = ad.load_seg(meta, fi)
+        if "audio" in want and "audio" in has:
+            clip.audio = ad.load_audio(meta, t0, t1, self.audio_sr, self.audio_mono)
+            clip.audio_sr = self.audio_sr if clip.audio is not None else None
+        if "imu" in want and "imu" in has:
+            imu = ad.load_imu(meta)
+            ann.imu = imu.window(t0 - 0.05, t1 + 0.05) if imu is not None else None
+        if "gaze" in want and "gaze" in has and ann.gaze_2d is None:
+            ann.gaze_2d = ad.load_gaze(meta, fi)
+        if "scene" in want and "scene" in has:
+            clip.scene = ad.load_scene(meta)
         return self.transform(clip) if self.transform else clip
 
-    def load_window(self, w: ClipWindow, with_frames: bool = True) -> Clip:
+    def load_window(self, w: ClipWindow, with_frames: bool | None = None) -> Clip:
         return self.load_clip(w.dataset, w.sequence_id, w.frame_indices, with_frames)

@@ -8,6 +8,13 @@ Layout under ``$EGO_DATA_ROOT/epic_kitchens``::
 
 The only labels are action segments (narration, verb, noun). There is no 3D ground truth:
 EPIC is the in-the-wild input for the pose extractors run in Month 2.
+
+Other modalities inside the MP4 files:
+* audio: stereo AAC at 48 kHz in every video.
+* imu: 142 of the 156 local videos (the GoPro Hero5/Hero7 recordings) carry a GPMF
+  telemetry track with a ~200 Hz accelerometer and gyroscope (``egograph.data.gpmf``).
+  Parsing it reads the whole file, so the result is cached under
+  ``$EGO_CACHE_ROOT/epic_kitchens/imu/<video>.npz`` (``egograph prepare`` fills it ahead of time).
 """
 
 from __future__ import annotations
@@ -18,9 +25,14 @@ from collections.abc import Iterator
 from functools import cached_property
 from pathlib import Path
 
+import av
+import numpy as np
+
 from egograph.data.adapters.base import DatasetAdapter, register
-from egograph.data.schema import ActionSegment, SequenceMeta
+from egograph.data.gpmf import read_imu, telemetry_stream
+from egograph.data.schema import ActionSegment, ImuTrack, SequenceMeta
 from egograph.data.video import probe
+from egograph.paths import cache_root
 
 
 def _ts(s: str) -> float:
@@ -96,6 +108,13 @@ class EpicKitchensAdapter(DatasetAdapter):
                 fps, dur, w, h, n = vi.fps, vi.duration_s, vi.width, vi.height, vi.num_frames
             acts = self._actions.get(vid, [])
             splits = {a.extra["split"] for a in acts}
+            try:
+                with av.open(str(video)) as c:
+                    has_audio, has_imu = bool(c.streams.audio), telemetry_stream(c) is not None
+                    codec = c.streams.video[0].codec_context.name
+            except Exception:
+                has_audio = has_imu = False
+                codec = "?"
             yield SequenceMeta(
                 dataset=self.name, sequence_id=vid,
                 video_path=str(video.relative_to(self.root)),
@@ -103,9 +122,26 @@ class EpicKitchensAdapter(DatasetAdapter):
                 has_actions=bool(acts),
                 tags={"participant": vid.split("_")[0],
                       "split": splits.pop() if len(splits) == 1 else ("mixed" if splits else "test"),
-                      "num_actions": len(acts),
+                      "num_actions": len(acts), "codec": codec,
                       "size_mb": round(video.stat().st_size / 2**20)},
+                modalities=["rgb", *(["audio"] if has_audio else []), *(["imu"] if has_imu else []),
+                            *(["actions"] if acts else [])],
             )
 
     def actions(self, meta: SequenceMeta) -> list[ActionSegment]:
         return self._actions.get(meta.sequence_id, [])
+
+    def load_imu(self, meta: SequenceMeta) -> ImuTrack | None:
+        if "imu" not in meta.modalities:
+            return None
+        cache = cache_root(self.name) / "imu" / f"{meta.sequence_id}.npz"
+        if not cache.exists():
+            d = read_imu(self.video_path(meta))
+            if d is None:
+                return None
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            tmp = cache.with_suffix(".tmp.npz")
+            np.savez_compressed(tmp, **d)
+            tmp.replace(cache)
+        with np.load(cache) as z:
+            return ImuTrack(z["t"], z["accel"], z["gyro"], frame="camera")

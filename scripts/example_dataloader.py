@@ -1,6 +1,7 @@
 """Iterate the unified torch DataLoader and print one batch, to check the data stack end to end.
 
     python scripts/example_dataloader.py configs/experiment/example_dataloader.yaml [key=value ...]
+    python scripts/example_dataloader.py configs/experiment/all_modalities.yaml   # every modality
 """
 
 import sys
@@ -23,7 +24,7 @@ def main() -> None:
     print(f"first batch in {time.time() - t:.1f}s")
     for k, v in batch.items():
         desc = f"{tuple(v.shape)} {v.dtype}" if torch.is_tensor(v) else v
-        print(f"  {k:16s} {desc}")
+        print(f"  {k:22s} {desc}")
 
 
 if __name__ == "__main__":

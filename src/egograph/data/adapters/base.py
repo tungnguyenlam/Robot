@@ -8,6 +8,16 @@ An adapter is the only code that knows a dataset's raw layout. It must provide:
 * ``load_annotations(meta, frame_indices)``: an ``Annotations`` object for those frames,
   in the standard format.
 
+Optional per-modality loaders (see egograph.data.modalities). Each returns None when the
+sequence lacks the modality, so a dataset overrides only what it has:
+
+* ``load_depth(meta, fi)`` -> (T, H, W) float32 metres on the RGB grid
+* ``load_seg(meta, fi)`` -> (T, H, W) uint8 instance ids
+* ``load_audio(meta, t0, t1, sr)`` -> (S, C) float32 (default: the video's own audio track)
+* ``load_imu(meta)`` -> ImuTrack for the whole sequence (the loader cuts the window)
+* ``load_gaze(meta, fi)`` -> (T, 2) pixels
+* ``load_scene(meta)`` -> ScenePoints
+
 To add a dataset, subclass ``DatasetAdapter``, decorate it with ``@register``, and import
 it in ``egograph/data/adapters/__init__.py``.
 """
@@ -21,7 +31,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from egograph.data.schema import ActionSegment, Annotations, SequenceMeta
+from egograph.data.schema import ActionSegment, Annotations, ImuTrack, ScenePoints, SequenceMeta
 from egograph.paths import data_root
 
 ADAPTERS: dict[str, type["DatasetAdapter"]] = {}
@@ -66,6 +76,29 @@ class DatasetAdapter(ABC):
 
     def actions(self, meta: SequenceMeta) -> list[ActionSegment]:
         return []
+
+    # ---- optional modalities (None = not available) -------------------------------------
+    def load_depth(self, meta: SequenceMeta, frame_indices: np.ndarray) -> np.ndarray | None:
+        return None
+
+    def load_seg(self, meta: SequenceMeta, frame_indices: np.ndarray) -> np.ndarray | None:
+        return None
+
+    def load_audio(self, meta: SequenceMeta, start_s: float, end_s: float, sample_rate: int = 16000,
+                   mono: bool = True) -> np.ndarray | None:
+        if "audio" not in meta.modalities:
+            return None
+        from egograph.data.video import read_audio
+        return read_audio(self.video_path(meta), start_s, end_s, sample_rate, mono)
+
+    def load_imu(self, meta: SequenceMeta) -> ImuTrack | None:
+        return None
+
+    def load_gaze(self, meta: SequenceMeta, frame_indices: np.ndarray) -> np.ndarray | None:
+        return None
+
+    def load_scene(self, meta: SequenceMeta) -> ScenePoints | None:
+        return None
 
     def load_annotations(self, meta: SequenceMeta, frame_indices: np.ndarray | list[int]) -> Annotations:
         """Default implementation: no per-frame labels, only the action segments that

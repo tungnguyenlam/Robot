@@ -78,12 +78,47 @@
 - Pushed to origin/main after rebasing to incorporate remote updates.
 - Report: runs/commit-push-2026-11-10/report.md
 
-## 2026-11-13 - Upgrade dataset web viewer
-- Added Dataset Overview & Visual Gallery (`GET /api/dataset/<ds>/overview`, `/api/sequence/<ds>/<sid>/thumbnail.jpg`, `/api/sequences/random`) with clickable distribution charts, multi-word search, sorting, and normalized `hands`/`rigid` facets.
-- Added interactive 3D viewport (`viewer3d.js`, camera/world frames, hand skeletons, 3D object boxes, camera frustum/trajectory, hand-object proximity) and per-frame telemetry (MANO reprojection error, 3D coords, min hand-object distance).
-- Added stage pan/zoom, PNG snapshot export, finger-color & joint-id overlay toggles, zoomable drag-scrub timeline with action looping, action search/auto-follow, and `Standard clip` transform pixel/overlay verification (`resize`/`crop` preview).
-- Added `tests/test_viewer.py` (4 viewer test functions); `pytest -q`: 15 passed. Restarted `scripts/viewer.sh` on `http://100.121.118.8:8765`.
+## 2026-11-16 - All core-paper modalities in the loader; Ego4D in index + viewer
+- Schema egoformat-v1.1 (v1 still loads): `Clip.depth/seg/audio/scene`, `Annotations.gaze_2d/imu`,
+  `HandTrack.bbox_2d`, `SequenceMeta.modalities`. `EgoLoader(modalities=[...])` loads on request;
+  `EgoClipDataset` emits fixed-shape keys with `*_valid` (missing -> zeros) so mixed batches collate.
+  Config: `data.modalities` (default [rgb]); example `configs/experiment/all_modalities.yaml`.
+- Sources: HOI4D depth (FFV1 16-bit mm AVI, pixel-aligned), 2D masks (VOC ids), 3Dseg scene cloud
+  (verified in the T_world_cam frame: median |depth - projected z| 1-3.5 cm); EPIC audio + GoPro
+  GPMF IMU (new `gpmf.py`, mapped to OpenCV camera frame); Ego4D audio, IMU CSV (device frame),
+  gaze (v flipped; checked by eye), narrations, FHO actions + hand/object boxes on key frames.
+- Contact proxy (`contact.py`): hand joints to object box < 1 cm; calibrated on 40 rigid HOI4D seqs
+  (carry/pick/put 98-99%, grasp 92%, reach 26%, rest 0%).
+- Fixes: HOI4D `_load_actions` KeyError on 17 `markResult` files; Ego4D adapter root ("ego4d" vs
+  "Ego4D") was why Ego4D never indexed. Ego4D: 278 videos indexed, v2 annotations (6 GB) + IMU/gaze
+  downloaded into data/Ego4D. HOI4D depth extraction still running (log data/HOI4D/extract_depth.log);
+  HOI4D auto-reindexes when it prints DONE.
+- CLI: `egograph prepare` (EPIC IMU cache), `egograph modalities`, `export --modalities`.
+  Viewer: Ego4D tab, modality badges/filters, hand boxes, gaze, IMU plot, depth/mask overlays.
+- Tests: 21 pass (new tests/test_modalities.py + 3 real-data tests). Docs: docs/MODALITIES.md.
+- Gemini (3 T3 threads) failed to summarize the papers (sandbox denied / stuck on approval);
+  the paper analysis was done directly.
 
-## 2026-11-15 - Revert 2026-11-13 web viewer upgrade
-- Reverted `src/egograph/viewer/` (app.py, app.js, index.html, style.css) to HEAD and removed `viewer3d.js` and `tests/test_viewer.py`; the Gemini-written upgrade was broken.
-- The "Upgrade dataset web viewer" entry above no longer describes the code.
+## 2026-11-17 - Modalities scoped to TOPIC_PLAN; HOI4D CAD + Ego4D FHO-only download
+- Decision: real labels only, no pseudo-labelling (Depth-Anything/WiLoR/SAM2) to fill gaps.
+- Plan-relevant: RGB, intrinsics, camera traj, 3D hands, object 6-DoF + meshes, contact, action text.
+  Secondary: IMU/gravity, 2D boxes, depth, masks. Not used: audio, gaze (off by default). See docs/MODALITIES.md.
+- Ego4D modality counts are low by design (IMU 23%, gaze 31 videos of 9821); our 278 match that.
+- HOI4D depth extraction done: depth 2973/2973 after reindex.
+- HOI4D CAD models added to data/HOI4D/download.py (1.5 GB zip, 2581 obj) and extracted to
+  data/HOI4D/HOI4D_CAD_Model_for_release/. Loader does not read meshes yet.
+- New scripts/ego4d_select_fho.py -> configs/data/ego4d_fho_uids.txt: FHO videos with boxes, ranked by
+  boxed actions/GB, 150 GB budget = 586 videos, 64k/106k boxed actions (full set would be 1.24 TB).
+  Downloading with lab22 --parts full_scale --uid-file (log data/Ego4D/fho_download.log); then checksum
+  verify + egograph index --dataset ego4d.
+
+## 2026-11-17 - Uncommitted work wiped by a macmini sync; recovered
+- 00:37: `scripts/sync_to_server.sh` run from macmini (rsync --delete-after, .git excluded) replaced
+  amdserver's working tree with macmini's, deleting all uncommitted 11-16/11-17 work. uv.lock lost too.
+- Recovered by replaying every Write/Edit/heredoc edit from the Claude transcript onto HEAD (40 ops, all
+  asserts passed), then 3-way merged with macmini's viewer edits (KINDS legend, updateLayers) and its
+  WORKLOG change. Backup outside the repo: ~/egograph-wip-backup-20261117/.
+- pytest: 20 pass, 1 fail: test_hoi4d_depth_seg_scene now picks a different first sequence (depth is
+  complete) where scene cloud vs depth is 14 cm off; to investigate.
+- HOI4D CAD meshes: rigid meshes are centred at the object origin with extents = box (l,w,h) in metres;
+  articulated parts use objs/new-k-align.obj per part. Loader + viewer integration not started.

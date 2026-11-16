@@ -31,7 +31,7 @@ from egograph.data.schema import HAND_PARENTS, HAND_SIDES
 from egograph.data.video import VideoReader
 
 STATIC = Path(__file__).parent / "static"
-FACET_TAGS = ("participant", "split", "category_name", "human", "task", "part")
+FACET_TAGS = ("participant", "split", "category_name", "human", "task", "scenario", "device")
 MAX_ANN_FRAMES = 900
 
 
@@ -100,6 +100,7 @@ def create_app() -> FastAPI:
                     with_object_pose=sum(m.has_object_pose for m in ms),
                     with_camera_pose=sum(m.has_camera_pose for m in ms),
                     with_actions=sum(m.has_actions for m in ms),
+                    modalities=Counter(x for m in ms for x in m.modalities).most_common(),
                     facets={t: Counter(str(m.tags[t]) for m in ms if t in m.tags).most_common(60)
                             for t in FACET_TAGS if any(t in m.tags for m in ms[:50])},
                 )
@@ -108,13 +109,15 @@ def create_app() -> FastAPI:
 
     @app.get("/api/sequences")
     def sequences(dataset: str, q: str | None = None, require: list[str] = Query(default=[]),
-                  tag: list[str] = Query(default=[]), offset: int = 0, limit: int = 100) -> Any:
+                  tag: list[str] = Query(default=[]), modality: list[str] = Query(default=[]),
+                  offset: int = 0, limit: int = 100) -> Any:
         idx = st.index(dataset)
         if idx is None:
             return {"total": 0, "items": []}
         tags = dict(t.split(":", 1) for t in tag if ":" in t)
         ms = [m for m in idx.filter(query=q, require=require)
-              if all(str(m.tags.get(k)) == v for k, v in tags.items())]
+              if all(str(m.tags.get(k)) == v for k, v in tags.items())
+              and all(x in m.modalities for x in modality)]
         return _clean({"total": len(ms), "items": [m.to_dict() for m in ms[offset:offset + limit]]})
 
     @app.get("/api/sequence/{dataset}/{sid}")
@@ -141,11 +144,13 @@ def create_app() -> FastAPI:
         hands = {}
         for side in HAND_SIDES:
             h = ann.hands[side]
-            if not h.valid.any():
+            has_box = np.isfinite(h.bbox_2d).all(1)
+            if not h.valid.any() and not has_box.any():
                 continue
-            mano2d = project(h.joints_3d, K) if K is not None else None
+            mano2d = project(h.joints_3d, K) if K is not None and h.valid.any() else None
             hands[side] = {"valid": h.valid, "joints_2d": h.joints_2d,
-                           "mano_2d": mano2d if mano2d is not None and np.isfinite(mano2d).any() else None}
+                           "mano_2d": mano2d if mano2d is not None and np.isfinite(mano2d).any() else None,
+                           "bbox_2d": h.bbox_2d if has_box.any() else None}
         objects = []
         for o in ann.objects:
             corners = np.full((len(fi), 8, 2), np.nan, np.float32)
@@ -162,7 +167,8 @@ def create_app() -> FastAPI:
                             "dimensions": o.dimensions,
                             "depth": [float(o.T_cam_obj[t, 2, 3]) if o.valid[t] else None
                                       for t in range(len(fi))]})
-        frames = {"start": start, "end": end, "hands": hands, "objects": objects}
+        frames = {"start": start, "end": end, "hands": hands, "objects": objects,
+                  "gaze_2d": ann.gaze_2d if ann.gaze_2d is not None and np.isfinite(ann.gaze_2d).any() else None}
         return _clean(frames)
 
     @app.get("/api/sequence/{dataset}/{sid}/annotations")
@@ -191,6 +197,59 @@ def create_app() -> FastAPI:
                       "camera": int(np.isfinite(a.T_world_cam).all(axis=(1, 2)).sum())
                       if a.T_world_cam is not None else 0},
         })
+
+    # ------------------------------------------------------------------ other modalities
+    @app.get("/api/modality/{dataset}/{sid}/{kind}/{index}.png")
+    def modality_image(dataset: str, sid: str, kind: str, index: int, w: int = 640) -> Response:
+        """Depth (turbo colour map, 0.2-2.0 m) or instance segmentation (VOC colours) of one
+        frame as a PNG with alpha, for overlaying on the video."""
+        from PIL import Image
+
+        from egograph.data.adapters.hoi4d import voc_palette
+
+        meta = st.meta(dataset, sid)
+        if kind not in ("depth", "seg") or kind not in meta.modalities:
+            raise HTTPException(404, f"{kind} not available for {dataset}/{sid}")
+        ad = st.loader.adapter(dataset)
+        i = np.array([min(max(index, 0), meta.num_frames - 1)])
+        if kind == "depth":
+            d = ad.load_depth(meta, i)[0]
+            x = np.clip((d - 0.2) / 1.8, 0, 1)
+            rgb = (_turbo(x) * 255).astype(np.uint8)
+            alpha = np.where(d > 0, 255, 0).astype(np.uint8)
+        else:
+            ids = ad.load_seg(meta, i)[0]
+            rgb = voc_palette()[ids]
+            alpha = np.where(ids > 0, 255, 0).astype(np.uint8)
+        img = Image.fromarray(np.dstack([rgb, alpha]), "RGBA")
+        img.thumbnail((w, w), Image.NEAREST)
+        buf = io.BytesIO()
+        img.save(buf, "PNG")
+        return Response(buf.getvalue(), media_type="image/png", headers={"Cache-Control": "max-age=86400"})
+
+    @lru_cache(maxsize=16)
+    def _imu_summary(dataset: str, sid: str, points: int) -> dict:
+        meta = st.meta(dataset, sid)
+        imu = st.loader.adapter(dataset).load_imu(meta)
+        if imu is None or len(imu.t) < 2:
+            return {"t": [], "accel": [], "gyro": [], "frame": None}
+        # Average into ``points`` bins so an hour of 200 Hz data stays a small JSON.
+        edges = np.linspace(imu.t[0], imu.t[-1], points + 1)
+        b = np.clip(np.searchsorted(edges, imu.t, side="right") - 1, 0, points - 1)
+        n = np.bincount(b, minlength=points).astype(np.float64)
+        n[n == 0] = np.nan
+        mean = lambda x: np.stack([np.bincount(b, x[:, k], minlength=points) / n for k in range(3)], 1)  # noqa: E731
+        return _clean({"t": (edges[:-1] + edges[1:]) / 2, "accel": mean(imu.accel), "gyro": mean(np.nan_to_num(imu.gyro)),
+                       "frame": imu.frame})
+
+    @app.get("/api/sequence/{dataset}/{sid}/imu")
+    def imu(dataset: str, sid: str, points: int = 1500) -> Any:
+        """IMU over the whole sequence, bin-averaged. The first call for an EPIC video parses
+        its GoPro telemetry (seconds); later calls hit the cache."""
+        meta = st.meta(dataset, sid)
+        if "imu" not in meta.modalities:
+            raise HTTPException(404, "no IMU for this sequence")
+        return JSONResponse(_imu_summary(dataset, sid, min(max(points, 50), 5000)))
 
     # ------------------------------------------------------------------ media
     @app.get("/api/frame/{dataset}/{sid}/{index}.jpg")
@@ -223,6 +282,15 @@ def create_app() -> FastAPI:
         return FileResponse(STATIC / "index.html")
 
     return app
+
+
+def _turbo(x: np.ndarray) -> np.ndarray:
+    """Google's Turbo colour map (polynomial approximation), x in [0, 1] -> RGB in [0, 1]."""
+    x = np.clip(x, 0, 1)[..., None]
+    r = 0.13572138 + x * (4.61539260 + x * (-42.66032258 + x * (132.13108234 + x * (-152.94239396 + x * 59.28637943))))
+    g = 0.09140261 + x * (2.19418839 + x * (4.84296658 + x * (-14.18503333 + x * (4.27729857 + x * 2.82956604))))
+    b = 0.10667330 + x * (12.64194608 + x * (-60.58204836 + x * (110.36276771 + x * (-89.90310912 + x * 27.34824973))))
+    return np.clip(np.concatenate([r, g, b], -1), 0, 1)
 
 
 def _range_response(path: Path, range_header: str | None, chunk: int = 1 << 20) -> Response:

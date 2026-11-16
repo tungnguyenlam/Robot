@@ -2,6 +2,8 @@
 
     egograph status                                   # what is downloaded and indexed
     egograph index --dataset all                      # (re)build the sequence indexes
+    egograph prepare --dataset epic_kitchens          # pre-parse slow modalities (EPIC GoPro IMU)
+    egograph modalities                               # per-dataset modality coverage
     egograph export --dataset hoi4d --limit 2 --out exports/demo --clip-len 32 --resize 512
     egograph viewer --host 0.0.0.0 --port 8765        # dataset web viewer
 """
@@ -35,12 +37,46 @@ def cmd_index(args: argparse.Namespace) -> None:
         build_index(name)
 
 
+def cmd_prepare(args: argparse.Namespace) -> None:
+    """Fill per-sequence caches that are slow to build on first access (EPIC IMU parsing reads
+    the whole video file). Safe to interrupt and rerun: finished sequences are skipped."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    ad = get_adapter(args.dataset)
+    metas = [m for m in SequenceIndex.load(args.dataset).metas if "imu" in m.modalities]
+
+    def one(m):
+        t = ad.load_imu(m)
+        return m.sequence_id, (len(t.t) if t is not None else 0)
+
+    with ThreadPoolExecutor(args.workers) as pool:
+        for k, (sid, n) in enumerate(pool.map(one, metas)):
+            print(f"[{k + 1}/{len(metas)}] {sid}: {n} IMU samples", flush=True)
+
+
+def cmd_modalities(args: argparse.Namespace) -> None:
+    from collections import Counter
+
+    from egograph.data.modalities import MODALITIES
+
+    names = list(MODALITIES)
+    print(f"{'modality':12s}" + "".join(f"{n:>15s}" for n in ADAPTERS))
+    counts, totals = {}, {}
+    for name in ADAPTERS:
+        ip = index_path(name)
+        ms = SequenceIndex.load(name).metas if ip.exists() else []
+        counts[name] = Counter(x for m in ms for x in m.modalities)
+        totals[name] = len(ms)
+    for mod in names:
+        print(f"{mod:12s}" + "".join(f"{counts[n][mod]:>9d}/{totals[n]:<5d}" for n in ADAPTERS))
+
+
 def cmd_export(args: argparse.Namespace) -> None:
     from egograph.data.loader import EgoLoader, sample_windows
     from egograph.data.transforms import build_transforms
 
     loader = EgoLoader(transform=build_transforms(
-        {"resize": args.resize, "center_crop": args.center_crop}))
+        {"resize": args.resize, "center_crop": args.center_crop}), modalities=args.modalities)
     idx = loader.index(args.dataset)
     metas = idx.filter(query=args.query, require=args.require)[: args.limit]
     windows = sample_windows(metas, args.clip_len, fps=args.fps, stride_s=args.stride_s,
@@ -85,7 +121,16 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--sampling", choices=["sliding", "actions"], default="sliding")
     s.add_argument("--resize", type=int, default=None, help="short side in pixels")
     s.add_argument("--center-crop", type=int, nargs=2, default=None, metavar=("W", "H"))
+    s.add_argument("--modalities", nargs="*", default=["rgb"],
+                   help="on-request modalities to export, e.g. rgb depth seg audio imu gaze scene")
     s.set_defaults(fn=cmd_export)
+
+    s = sub.add_parser("prepare", help="pre-build slow per-sequence caches (EPIC GoPro IMU)")
+    s.add_argument("--dataset", default="epic_kitchens", choices=list(ADAPTERS))
+    s.add_argument("--workers", type=int, default=2, help="parallel files (the data disk is an HDD)")
+    s.set_defaults(fn=cmd_prepare)
+
+    sub.add_parser("modalities", help="which modalities each indexed dataset has").set_defaults(fn=cmd_modalities)
 
     s = sub.add_parser("viewer")
     s.add_argument("--host", default="127.0.0.1")

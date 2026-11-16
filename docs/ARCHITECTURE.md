@@ -9,16 +9,21 @@ Robot/
 ├── src/egograph/
 │   ├── paths.py                 EGO_DATA_ROOT / EGO_INDEX_ROOT / EGO_MANO_DIR / EGO_RUNS_ROOT
 │   ├── config.py                YAML loading, `_base_` inheritance, `a.b.0.c=value` overrides
-│   ├── cli.py                   `egograph status | index | export | viewer`
+│   ├── cli.py                   `egograph status | index | prepare | modalities | export | viewer`
 │   ├── data/
-│   │   ├── schema.py            egoformat-v1 (SequenceMeta, Clip, Annotations, HandTrack, ObjectTrack)
+│   │   ├── schema.py            egoformat-v1.1 (SequenceMeta, Clip, Annotations, HandTrack, ObjectTrack,
+│   │   │                        ImuTrack, ScenePoints)
+│   │   ├── modalities.py        registry of modality names, sources and tensor keys
 │   │   ├── adapters/            one file per dataset (the only code that knows raw layouts)
 │   │   │   ├── base.py          DatasetAdapter interface and registry
-│   │   │   ├── hoi4d.py         3D GT: MANO hands, 6-DoF objects, camera trajectory, actions
-│   │   │   ├── epic_kitchens.py videos and narrated action segments
-│   │   │   └── ego4d.py         videos (and FHO later)
+│   │   │   ├── hoi4d.py         3D GT: MANO hands, 6-DoF objects, camera trajectory, actions,
+│   │   │   │                    depth, 2D masks, scene point cloud
+│   │   │   ├── epic_kitchens.py videos, narrated action segments, audio, GoPro IMU
+│   │   │   └── ego4d.py         videos, narrations, FHO actions with hand/object boxes, audio, IMU, gaze
 │   │   ├── index.py             cached JSONL sequence index per dataset
-│   │   ├── video.py             frame-exact PyAV reader
+│   │   ├── video.py             frame-exact PyAV reader (RGB or 16-bit depth) and audio reader
+│   │   ├── gpmf.py              GoPro telemetry (ACCL/GYRO) parser
+│   │   ├── contact.py           hand-object contact proxy from 3D joints and object boxes
 │   │   ├── geometry.py          projection, transforms, intrinsics resize/crop
 │   │   ├── transforms.py        resize/crop that keep K and 2D labels consistent
 │   │   ├── loader.py            EgoLoader + sample_windows (sliding / action-centred)
@@ -29,7 +34,7 @@ Robot/
 │   └── viewer/                  FastAPI app and static frontend (no build step)
 ├── scripts/                     example_dataloader.py, viewer.sh, sync_to_server.sh
 ├── tests/                       unit tests run anywhere; dataset tests skip without data
-├── docs/                        DATA_FORMAT.md, DATASETS_GUIDE.md, this file
+├── docs/                        DATA_FORMAT.md, MODALITIES.md, DATASETS_GUIDE.md, this file
 ├── runs/                        experiment outputs (heavy files gitignored)
 └── data -> /hdd/Robot/data      raw datasets (on amdserver; gitignored)
 ```
@@ -40,8 +45,9 @@ Robot/
 raw files ──adapter.scan()──► index (JSONL) ──sample_windows()──► ClipWindow list
                                                                       │
              adapter.load_annotations() + VideoReader.read() ◄────────┘
+             + adapter.load_{depth,seg,audio,imu,gaze,scene}() for requested modalities
                                    │
-                             Clip (egoformat-v1) ──transforms──► Clip
+                             Clip (egoformat-v1.1) ──transforms──► Clip
                                    │
         ┌──────────────────────────┼───────────────────────────┐
    Clip.save() (export)    clip_to_tensors() (training)    viewer overlays

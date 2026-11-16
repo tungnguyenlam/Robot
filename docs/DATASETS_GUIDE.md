@@ -151,7 +151,7 @@ python epic_downloader.py --masks --participants P01 --output-path ~/datasets/ep
 | **`HOI4D_release.zip` (Core RGB)** | **21.7 GB** | Primary video sequences and metadata |
 | **Full Dataset Archive (RGB + Depth + Point Clouds)** | **~1.83 TB** | Complete raw release (also on HuggingFace `Livioni/hoi4d`) |
 | **Uncompressed Extracted Frames** | **~2.5 – 3.0+ TB** | Extracted 2.4M RGB-D frames from 4,000+ sequences |
-| **CAD Models (`CAD_models.zip`)** | **~350 MB** | Category 3D meshes for objects |
+| **CAD Models (`HOI4D_CAD_Model_for_release.zip`)** | **1.5 GB zip, 5.3 GB extracted** | Category 3D meshes for objects |
 | **Annotations (`Annotations.zip`)** | **~1.2 GB** | Category 6D object poses & MANO hand poses |
 | **Camera Parameters** | **~15 MB** | Camera intrinsics and extrinsics matrices |
 
@@ -160,7 +160,7 @@ python epic_downloader.py --masks --participants P01 --output-path ~/datasets/ep
 #### Step 1: Direct Download from Links
 1. Open [https://hoi4d.github.io/](https://hoi4d.github.io/).
 2. Under **Data & Resources / Downloads**, click the component you need:
-   - **CAD Models** (`CAD_models.zip`, ~350 MB)
+   - **CAD Models** (`HOI4D_CAD_Model_for_release.zip`, 1.5 GB; fetched by `data/HOI4D/download.py`)
    - **Annotations** (`Annotations.zip`, ~1.2 GB)
    - **Camera Parameters** (~15 MB)
    - **RGB Video** (`HOI4D_release.zip`, 21.7 GB)
@@ -203,7 +203,7 @@ python utils/decode.py
 | **Ego4D** | FHO Benchmark Clips + Annotations | `lab22 download ego4d -o ~/lab22-data/ego4d --parts clips annotations --benchmarks FHO -y` | **~1.2 GB** |
 | **EPIC-100** | Annotations only | `git clone https://github.com/epic-kitchens/epic-kitchens-100-annotations.git` | **~50 MB** |
 | **EPIC-100** | Single Video (`P01_01`) RGB frames | `python epic_downloader.py --rgb-frames --train --specific-videos P01_01` | **~1.5 GB** |
-| **HOI4D** | CAD Models & Annotations | Download `CAD_models.zip` & `Annotations.zip` from [hoi4d.github.io](https://hoi4d.github.io/) | **~1.5 GB** |
+| **HOI4D** | CAD Models & Annotations | Download `HOI4D_CAD_Model_for_release.zip` & `Annotations.zip` from [hoi4d.github.io](https://hoi4d.github.io/) | **~1.5 GB** |
 
 ---
 
@@ -265,7 +265,7 @@ In HOI4D, the data distribution is naturally split between compressed archives a
 1. **Download the Core Archives (~23.3 GB download):**
    - Download `HOI4D_release.zip` (**21.7 GB**) from the OneDrive link on [hoi4d.github.io](https://hoi4d.github.io/).
    - Download `Annotations.zip` (**1.2 GB**).
-   - Download `CAD_models.zip` (**0.35 GB**).
+   - Download `HOI4D_CAD_Model_for_release.zip` (**1.5 GB**).
    - Download `Camera Parameters` (**~15 MB**).
 
 2. **Unpack & Selective Category Decoding (~80 – 100 GB working set):**

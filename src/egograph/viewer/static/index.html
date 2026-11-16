@@ -20,7 +20,7 @@
       <section class="card browser">
         <input id="search" type="search" placeholder="Search id or tag…" autocomplete="off" />
         <div id="filters" class="filters"></div>
-        <div id="seq-count" class="dim small"></div>
+        <div class="row small"><span id="seq-count" class="dim"></span><span id="flag-legend" class="legend"></span></div>
         <ul id="seq-list" class="seq-list"></ul>
         <button id="load-more" class="ghost" hidden>Load more</button>
       </section>
@@ -42,6 +42,7 @@
         <div class="stage-wrap">
           <div id="stage" class="stage">
             <video id="video" preload="auto" playsinline muted></video>
+            <img id="mod-img" class="mod-img" alt="" hidden />
             <canvas id="overlay"></canvas>
             <div id="action-now" class="action-now"></div>
           </div>
@@ -57,10 +58,11 @@
           </select>
           <div class="readout mono"><span id="frame-no">0</span> / <span id="frame-total">0</span> · <span id="time-no">0.00</span>s</div>
           <div class="spacer"></div>
+          <span id="overlay-note" class="dim small"></span>
           <div id="layers" class="layers"></div>
         </div>
 
-        <div id="timeline" class="timeline">
+        <div id="timeline" class="timeline" title="Top lane: action segments · bottom lane: frames with hand (orange/cyan) / object (green) pose">
           <div id="tl-segments" class="tl-segments"></div>
           <div id="tl-valid" class="tl-valid"></div>
           <div id="tl-head" class="tl-head"></div>
@@ -78,7 +80,7 @@
           </section>
           <section class="card wide">
             <div class="row">
-              <h3>Standard clip <span class="dim small">egoformat-v1, what the data loader yields</span></h3>
+              <h3>Standard clip <span class="dim small">egoformat-v1.1, what the data loader yields</span></h3>
               <div class="spacer"></div>
               <label class="small">frames <input id="clip-num" type="number" value="8" min="1" max="32" /></label>
               <label class="small">fps <input id="clip-fps" type="number" value="" placeholder="native" min="1" max="60" /></label>
@@ -86,6 +88,10 @@
             </div>
             <div id="clip-strip" class="strip"></div>
             <div id="clip-info" class="clip-info mono small"></div>
+          </section>
+          <section id="imu-card" class="card wide" hidden>
+            <h3>IMU <span id="imu-note" class="dim small"></span></h3>
+            <canvas id="imu-plot" style="width:100%;height:160px;display:block"></canvas>
           </section>
           <section class="card wide">
             <h3>Actions <span id="act-count" class="dim small"></span></h3>
