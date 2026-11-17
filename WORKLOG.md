@@ -144,3 +144,16 @@
   requires 4 of 6 sequences to agree; documented in docs/MODALITIES.md.
 - Fixed temp-file races in the mesh and EPIC IMU caches (parallel writers). Ego4D FHO
   checksum verify: 588/588 ok. Tests: 24 pass.
+
+## 2026-11-18 - Viewer: MANO hand mesh, contact, scene cloud; Ego4D FHO contact/PNR key frames
+- Audit of raw data/modalities vs viewer. Plan-relevant gaps closed; audio skipped (not in the study).
+- Viewer layers: "hand mesh (MANO)" (`/api/.../handmesh`, int16 0.1 mm; one depth sort with CAD
+  meshes), "contact (derived)" (same 1 cm proxy as tensors: label, pink box, timeline lane),
+  "scene cloud" (HOI4D 3Dseg projected per frame, z-buffered; misregistered seqs are obvious),
+  "contact / PNR frames" (Ego4D timeline ticks + banner). Chunks now carry contact dist and T_cam_world.
+- New modality `keyframes` (Ego4D 587/831): FHO `contact_frame` (~half the actions) and `pnr_frame`
+  → tensors `keyframe (2,T)`, `keyframe_valid`; `contact.fho_keyframes`. Ego4D reindexed.
+- Decision: `fho_oscc-pnr` not loaded: its 65k state-change clips on our videos repeat fho_main PNR
+  frames (98% exact); only 12k "no state change" negatives are new. sta/lta/goalstep/nlq/vq/av skipped.
+- Tests: 27 pass (+keyframe mapping, Ego4D keyframes, viewer hand mesh/contact/scene endpoints).
+  Screenshots: results/viewer_check/. Viewer restarted on :8765.

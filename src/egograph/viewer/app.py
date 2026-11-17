@@ -24,6 +24,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from fastapi.staticfiles import StaticFiles
 
 from egograph.data.adapters import ADAPTERS
+from egograph.data.contact import DEFAULT_THRESHOLD_M, hand_object_distance
 from egograph.data.geometry import BOX_EDGES, box_corners, project, transform_points
 from egograph.data.index import SequenceIndex, index_path
 from egograph.data.loader import EgoLoader, frame_indices_at
@@ -33,6 +34,7 @@ from egograph.data.video import VideoReader
 STATIC = Path(__file__).parent / "static"
 FACET_TAGS = ("participant", "split", "category_name", "human", "task", "scenario", "device")
 MAX_ANN_FRAMES = 900
+MANO_VERTS = 778
 
 
 def _clean(x: Any) -> Any:
@@ -134,11 +136,16 @@ def create_app() -> FastAPI:
                        "hand_parents": HAND_PARENTS, "box_edges": BOX_EDGES})
 
     # ------------------------------------------------------------------ annotations
+    @lru_cache(maxsize=32)
+    def _raw_annotations(dataset: str, sid: str, start: int, end: int):
+        """The adapter's ``Annotations`` for one chunk, shared by the JSON and hand-mesh endpoints."""
+        return st.loader.adapter(dataset).load_annotations(st.meta(dataset, sid), np.arange(start, end))
+
     @lru_cache(maxsize=64)
     def _annotations(dataset: str, sid: str, start: int, end: int) -> dict:
         meta = st.meta(dataset, sid)
         fi = np.arange(start, end)
-        ann = st.loader.adapter(dataset).load_annotations(meta, fi)
+        ann = _raw_annotations(dataset, sid, start, end)
         K = meta.K
         frames: dict[str, Any] = {}
         hands = {}
@@ -169,9 +176,83 @@ def create_app() -> FastAPI:
                             "T_cam_obj": pose[:, :3] if pose is not None else None,
                             "depth": [float(o.T_cam_obj[t, 2, 3]) if o.valid[t] else None
                                       for t in range(len(fi))]})
-        frames = {"start": start, "end": end, "hands": hands, "objects": objects,
+        # Derived contact (HOI4D): signed hand-to-box distance per hand, object, frame; same
+        # function and threshold as the `contact` tensors, so the viewer shows what training sees.
+        contact = None
+        if "contact" in meta.modalities and objects:
+            d = hand_object_distance(ann)
+            contact = {"dist": {side: d[s] for s, side in enumerate(HAND_SIDES)},
+                       "threshold": DEFAULT_THRESHOLD_M}
+        # Camera pose per frame as world->camera 3x4, to project the static scene cloud.
+        T_cw = None
+        if ann.T_world_cam is not None and np.isfinite(ann.T_world_cam).any():
+            T_cw = np.full((len(fi), 3, 4), np.nan, np.float32)
+            ok = np.isfinite(ann.T_world_cam).all(axis=(1, 2))
+            T_cw[ok] = np.linalg.inv(ann.T_world_cam[ok])[:, :3]
+        frames = {"start": start, "end": end, "hands": hands, "objects": objects, "contact": contact,
+                  "T_cam_world": T_cw,
                   "gaze_2d": ann.gaze_2d if ann.gaze_2d is not None and np.isfinite(ann.gaze_2d).any() else None}
         return _clean(frames)
+
+    # ------------------------------------------------------------------ MANO hand mesh
+    _mano: dict[str, Any] = {}
+
+    def mano_model():
+        if "m" not in _mano:
+            from egograph.hands.mano import ManoModel
+            try:
+                _mano["m"] = ManoModel()
+            except Exception as e:  # smplx or the MANO pickles missing
+                raise HTTPException(503, f"MANO model unavailable: {e}") from e
+        return _mano["m"]
+
+    @app.get("/api/hand_faces")
+    def hand_faces() -> Any:
+        m = mano_model()
+        return {side: m.faces(side).ravel().tolist() for side in HAND_SIDES}
+
+    @lru_cache(maxsize=16)
+    def _hand_mesh(dataset: str, sid: str, start: int, end: int) -> bytes:
+        ann = _raw_annotations(dataset, sid, start, end)
+        T = len(ann.frame_indices)
+        out = np.full((len(HAND_SIDES), T, MANO_VERTS, 3), -32768, np.int16)
+        for s, side in enumerate(HAND_SIDES):
+            h = ann.hands[side]
+            v = h.valid & np.isfinite(h.mano_pose).all(1) & np.isfinite(h.mano_trans).all(1)
+            if v.any():
+                verts = mano_model().forward(side, h.mano_pose[v], np.nan_to_num(h.mano_betas[v]), h.mano_trans[v])[1]
+                out[s, v] = np.clip(np.round(verts * 1e4), -32767, 32767)  # 0.1 mm units, camera frame
+        return out.tobytes()
+
+    @app.get("/api/sequence/{dataset}/{sid}/handmesh")
+    def handmesh(dataset: str, sid: str, start: int = 0, end: int | None = None) -> Response:
+        """MANO vertices for frames [start, end) as little-endian int16 (2, T, 778, 3) in 0.1 mm,
+        camera frame; -32768 marks a missing hand. The client projects and shades them."""
+        meta = st.meta(dataset, sid)
+        if not meta.has_hand_pose:
+            raise HTTPException(404, f"no hand pose for {dataset}/{sid}")
+        end = min(end if end is not None else meta.num_frames, meta.num_frames, start + MAX_ANN_FRAMES)
+        return Response(_hand_mesh(dataset, sid, max(start, 0), end), media_type="application/octet-stream",
+                        headers={"Cache-Control": "max-age=3600"})
+
+    # ------------------------------------------------------------------ static scene cloud
+    @lru_cache(maxsize=8)
+    def _scene(dataset: str, sid: str, n: int) -> bytes:
+        meta = st.meta(dataset, sid)
+        sc = st.loader.adapter(dataset).load_scene(meta) if "scene" in meta.modalities else None
+        if sc is None or not len(sc.xyz):
+            raise HTTPException(404, f"no scene cloud for {dataset}/{sid}")
+        k = np.random.default_rng(0).permutation(len(sc.xyz))[:n]
+        N = len(k)
+        return (np.uint32(N).tobytes() + sc.xyz[k].astype("<f4").tobytes()
+                + sc.label[k].astype("<i2").tobytes() + sc.rgb[k].astype(np.uint8).tobytes())
+
+    @app.get("/api/scene/{dataset}/{sid}")
+    def scene(dataset: str, sid: str, n: int = 40000) -> Response:
+        """Random subset of the static scene cloud (world frame): uint32 N, then float32 xyz (N,3),
+        int16 label (N,), uint8 rgb (N,3)."""
+        return Response(_scene(dataset, sid, int(min(max(n, 1000), 200000))), media_type="application/octet-stream",
+                        headers={"Cache-Control": "max-age=3600"})
 
     @lru_cache(maxsize=256)
     def _mesh(dataset: str, rel: str) -> dict[str, Any]:

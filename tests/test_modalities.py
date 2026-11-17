@@ -128,7 +128,7 @@ def test_tensors_fixed_shapes_and_missing_modalities():
 
     from egograph.data.torch_dataset import clip_to_tensors
 
-    mods = {"rgb", "depth", "seg", "audio", "imu", "gaze", "scene", "contact"}
+    mods = {"rgb", "depth", "seg", "audio", "imu", "gaze", "scene", "contact", "keyframes"}
     full = clip_to_tensors(_clip(), modalities=mods, audio_samples=2000, scene_points=64)
     bare = _clip()
     bare.depth = bare.seg = bare.audio = bare.scene = None
@@ -143,3 +143,22 @@ def test_tensors_fixed_shapes_and_missing_modalities():
     np.testing.assert_allclose(b["gravity_cam"][0].numpy(), [0, 1, 0], atol=1e-6)  # down = +y in OpenCV
     assert b["gaze_valid"][0].all() and not b["gaze_valid"][1].any()
     assert b["contact"].shape == (2, 2, 4, 4)
+    assert b["keyframe"].shape == (2, 2, 4) and b["keyframe_valid"].tolist() == [False, False]
+
+
+def test_fho_keyframes_map_to_nearest_clip_frame():
+    from egograph.data.contact import KEYFRAME_KINDS, fho_keyframes
+    from egograph.data.schema import ActionSegment
+
+    ann = Annotations.empty(np.arange(100, 120, 2), 30.0)            # every 2nd frame: 100..118
+    kf, labelled = fho_keyframes(ann)
+    assert kf.shape == (len(KEYFRAME_KINDS), 10) and not kf.any() and not labelled
+    ann.actions = [ActionSegment(3.3, 4.0, "grab", extra={"critical_frames": {"contact_frame": 105, "pnr_frame": 110}}),
+                   ActionSegment(3.3, 4.0, "far", extra={"critical_frames": {"pnr_frame": 500}})]
+    kf, labelled = fho_keyframes(ann)
+    assert labelled
+    assert np.flatnonzero(kf[0]).tolist() == [2]   # 105 -> clip frame 104 or 106 (first of the tie)
+    assert np.flatnonzero(kf[1]).tolist() == [5]   # 110 exactly; 500 is outside the window
+    ann1 = Annotations.empty(np.arange(100, 120), 30.0)               # stride 1: exact frames only
+    ann1.actions = ann.actions
+    assert np.flatnonzero(fho_keyframes(ann1)[0][0]).tolist() == [5]

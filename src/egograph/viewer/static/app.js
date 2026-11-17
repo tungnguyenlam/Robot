@@ -19,6 +19,9 @@ const fmt = (n, d = 0) => (n === null || n === undefined ? "–" : Number(n).toL
 const hue = (s) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const segColor = (s) => `hsl(${hue(s.toLowerCase())} 55% 52%)`;
 const CHUNK = 300;
+const MANO_V = 778;
+const KEYFRAME_KINDS = { contact_frame: { name: "contact onset", color: "#ffe14c" }, pnr_frame: { name: "PNR (state change)", color: "#ff5d5d" } };
+const CONTACT = "#ff3b6b";
 
 // One definition of each annotation kind, used by the list flags, legend and badges.
 const KINDS = [
@@ -37,15 +40,20 @@ const LAYERS = [
   { key: "handbox", label: "hand 2D box", color: "#ffd24c", on: true, mod: "hand_box" },
   { key: "gaze", label: "gaze", color: "#ff4cf0", on: true, mod: "gaze" },
   { key: "mesh", label: "object mesh (CAD)", color: "#7fd1ff", on: true, mod: "mesh" },
+  { key: "handmesh", label: "hand mesh (MANO)", color: "#ffb38a", on: true, needs: "has_hand_pose" },
+  { key: "contact", label: "contact (derived)", color: "#ff3b6b", on: true, mod: "contact" },
+  { key: "keyframes", label: "contact / PNR frames", color: "#ffe14c", on: true, mod: "keyframes" },
+  { key: "scene", label: "scene cloud", color: "#9a9aff", on: false, mod: "scene" },
   { key: "axes", label: "object axes", color: "#ff5d5d", on: false, needs: "has_object_pose" },
   { key: "depth", label: "depth (paused)", color: "#3be0c0", on: false, mod: "depth" },
   { key: "seg", label: "masks (paused)", color: "#b04cff", on: false, mod: "seg" },
 ];
 const hasMod = (m, k) => (m.modalities || []).includes(k);
+const HAND_SIDES = ["left", "right"];
 
 const S = {
   datasets: [], ds: null, q: "", require: new Set(), mods: new Set(), tags: {}, offset: 0, total: 0,
-  seq: null, frame: 0, chunks: new Map(), pending: new Set(), meshes: new Map(), layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
+  seq: null, frame: 0, chunks: new Map(), pending: new Set(), meshes: new Map(), handMesh: new Map(), handFaces: null, scene: null, keyframes: [], layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
 };
 
 // ─────────────────────────────── datasets ───────────────────────────────
@@ -164,13 +172,18 @@ function markActive() {
 // ─────────────────────────────── sequence ───────────────────────────────
 async function openSequence(dataset, sid, startFrame = 0) {
   const seq = await api(`/api/sequence/${dataset}/${encodeURIComponent(sid)}`);
-  S.seq = seq; S.chunks = new Map(); S.pending = new Set(); S.frame = 0;
+  S.seq = seq; S.chunks = new Map(); S.pending = new Set(); S.frame = 0; S.handMesh = new Map(); S.scene = null;
+  // FHO critical frames (Ego4D): contact onset and point of no return, from the actions.
+  S.keyframes = seq.actions.flatMap((a) => Object.entries(KEYFRAME_KINDS).flatMap(([k, d]) => {
+    const f = a.extra?.critical_frames?.[k];
+    return f === undefined || f === null ? [] : [{ f, kind: k, ...d, label: a.label }];
+  })).sort((a, b) => a.f - b.f);
   history.replaceState(null, "", `#${dataset}/${sid}`);
   const m = seq.meta;
   $("#empty").hidden = true; $("#player").hidden = false;
   $("#seq-id").textContent = m.sequence_id;
   const ALL = ["rgb", "depth", "seg", "audio", "imu", "gaze", "scene", "intrinsics", "camera_pose",
-    "hand_pose", "hand_box", "object_pose", "object_box", "mesh", "contact", "actions"];
+    "hand_pose", "hand_box", "object_pose", "object_box", "mesh", "contact", "keyframes", "actions"];
   const mods = new Set(m.modalities?.length ? m.modalities : [
     "rgb", m.has_hand_pose && "hand_pose", m.has_object_pose && "object_pose", m.has_camera_pose && "camera_pose",
     m.has_actions && "actions", m.intrinsics && "intrinsics"].filter(Boolean));
@@ -205,6 +218,9 @@ function renderTimeline() {
   $("#tl-segments").replaceChildren(...actions.map((a) => el("div", {
     class: "tl-seg", title: `${a.label}  ${fmt(a.start_s, 2)}–${fmt(a.end_s, 2)}s`,
     style: `left:${(a.start_s / dur) * 100}%;width:${Math.max(((a.end_s - a.start_s) / dur) * 100, 0.15)}%;background:${segColor(a.verb || a.label)}`,
+  })), ...S.keyframes.map((k) => el("div", {
+    class: "tl-key", title: `${k.name} · frame ${k.f} · ${k.label}`,
+    style: `left:${(k.f / meta.fps / dur) * 100}%;background:${k.color}`,
   })));
   $("#tl-valid").replaceChildren();
 }
@@ -212,11 +228,15 @@ function renderTimeline() {
 function renderValidity() {
   // Coverage strip: hands (orange or cyan) over objects (green), from the loaded chunks.
   const { meta } = S.seq, n = meta.num_frames;
-  const c = el("canvas", { width: 1200, height: 7, style: "width:100%;height:7px;display:block" });
+  const hasC = [...S.chunks.values()].some((ch) => ch.contact);
+  const H = hasC ? 10 : 7;
+  const c = el("canvas", { width: 1200, height: H, style: `width:100%;height:${H}px;display:block` });
+  $("#tl-valid").style.height = `${H}px`;
   const ctx = c.getContext("2d");
   for (const ch of S.chunks.values()) {
     for (let i = 0; i < ch.end - ch.start; i++) {
       const x = ((ch.start + i) / n) * 1200, w = Math.max(1200 / n, 1);
+      if (hasC && HAND_SIDES.some((sd) => contactAt(ch, sd, i))) { ctx.fillStyle = CONTACT; ctx.fillRect(x, 7, w, 3); }
       if (ch.objects.some((o) => o.valid[i])) { ctx.fillStyle = "#a6e35a"; ctx.fillRect(x, 4, w, 3); }
       const l = ch.hands.left?.valid[i] || ch.hands.left?.bbox_2d?.[i]?.[0] != null,
         r = ch.hands.right?.valid[i] || ch.hands.right?.bbox_2d?.[i]?.[0] != null;
@@ -318,6 +338,7 @@ function draw() {
   });
   drawImuHead(t);
   updateModImage(f);
+  $("#timeline").classList.toggle("hide-keys", !S.layers.keyframes);
   if (S.trajXY) {
     const tr = S.seq.camera_trajectory, k = tr.findIndex((p) => p[0] >= f);
     const p = S.trajXY[k < 0 ? tr.length - 1 : k]; const d = $("#traj-dot");
@@ -331,20 +352,28 @@ function draw() {
   const P = (p) => [p[0] * s, p[1] * s];
   const lw = Math.max(1.5, 2 * s * dpr);
   ctx.lineCap = "round"; ctx.lineJoin = "round";
+  const touch = Object.fromEntries(HAND_SIDES.map((sd) => [sd, S.layers.contact ? contactAt(ch, sd, i) : null]));
+  const touched = new Set(Object.values(touch).filter(Boolean).map((c) => c.o));
 
-  if (S.layers.mesh && m.intrinsics) {
+  if (S.layers.scene && hasMod(m, "scene") && m.intrinsics) drawScene(ctx, ch, i, m, s);
+  if ((S.layers.mesh || S.layers.handmesh) && m.intrinsics) {
+    // Object and hand triangles share one painter's sort, so hands occlude objects correctly.
     // Opaque faces on an offscreen canvas, then one translucent blit (no alpha build-up).
-    const mc = S.meshCv || (S.meshCv = document.createElement("canvas"));
-    if (mc.width !== cv.width || mc.height !== cv.height) { mc.width = cv.width; mc.height = cv.height; }
-    const mctx = mc.getContext("2d"); mctx.clearRect(0, 0, mc.width, mc.height);
-    let any = false;
-    for (const o of ch.objects) if (o.valid[i] && o.mesh_path && o.T_cam_obj?.[i]?.[0]?.[0] != null) any = drawMesh(mctx, o, i, m, s) || any;
-    if (any) { ctx.globalAlpha = 0.55; ctx.drawImage(mc, 0, 0); ctx.globalAlpha = 1; }
+    const tris = [];
+    if (S.layers.mesh) for (const o of ch.objects) if (o.valid[i] && o.mesh_path && o.T_cam_obj?.[i]?.[0]?.[0] != null) meshTris(tris, o, i, m, s);
+    if (S.layers.handmesh && m.has_hand_pose) handTris(tris, ch, i, m, s, touch);
+    if (tris.length) {
+      const mc = S.meshCv || (S.meshCv = document.createElement("canvas"));
+      if (mc.width !== cv.width || mc.height !== cv.height) { mc.width = cv.width; mc.height = cv.height; }
+      const mctx = mc.getContext("2d"); mctx.clearRect(0, 0, mc.width, mc.height);
+      paintTris(mctx, tris);
+      ctx.globalAlpha = 0.6; ctx.drawImage(mc, 0, 0); ctx.globalAlpha = 1;
+    }
   }
-  for (const o of ch.objects) {
-    if (!o.valid[i]) continue;
+  ch.objects.forEach((o, oi) => {
+    if (!o.valid[i]) return;
     if (S.layers.box3d && o.corners_2d[i][0][0] !== null) {
-      ctx.strokeStyle = "#a6e35a"; ctx.lineWidth = lw;
+      ctx.strokeStyle = touched.has(oi) ? CONTACT : "#a6e35a"; ctx.lineWidth = touched.has(oi) ? lw * 1.6 : lw;
       ctx.beginPath();
       for (const [a, b] of S.seq.box_edges) { const pa = P(o.corners_2d[i][a]), pb = P(o.corners_2d[i][b]); ctx.moveTo(...pa); ctx.lineTo(...pb); }
       ctx.stroke();
@@ -362,7 +391,7 @@ function draw() {
       const anchor = o.bbox_2d[i][0] !== null ? [o.bbox_2d[i][0] * s, o.bbox_2d[i][1] * s - 6 * dpr] : null;
       if (anchor) label(ctx, `${o.label}${o.depth[i] ? ` · ${o.depth[i].toFixed(2)} m` : ""}`, anchor, "#a6e35a", dpr);
     }
-  }
+  });
   for (const [side, h] of Object.entries(ch.hands)) {
     const color = side === "left" ? "#4cc3ff" : "#ff8a4c";
     const hb = h.bbox_2d?.[i];
@@ -374,52 +403,163 @@ function draw() {
     if (!h.valid[i]) continue;
     if (S.layers.hands) skeleton(ctx, h.joints_2d[i].map(P), color, lw, dpr);
     if (S.layers.mano && h.mano_2d && h.mano_2d[i][0][0] !== null) skeleton(ctx, h.mano_2d[i].map(P), "#f05bd8", lw * 0.7, dpr * 0.7);
+    const c = touch[side], w = h.joints_2d[i][0];
+    if (c && w[0] !== null) label(ctx, `${side} ● ${ch.objects[c.o].label} ${(c.d * 100).toFixed(1)} cm`, [w[0] * s + 10 * dpr, w[1] * s + 18 * dpr], CONTACT, dpr);
   }
   drawGaze(ctx, ch, i, s, dpr);
+  drawKeyframes(ctx, f, m, dpr);
 }
 
-// CAD mesh: transform by T_cam_obj, project with K, paint back-to-front with flat shading.
-function drawMesh(ctx, o, i, m, s) {
-  ctx.lineWidth = 0.6;
-  const key = `${m.dataset}:${o.mesh_path}`, mesh = S.meshes.get(key);
-  if (!mesh) {
-    S.meshes.set(key, "pending");
-    api(`/api/mesh/${m.dataset}?path=${encodeURIComponent(o.mesh_path)}`)
-      .then((r) => { S.meshes.set(key, { v: Float32Array.from(r.vertices), f: Uint32Array.from(r.faces) }); draw(); })
-      .catch(() => S.meshes.set(key, "missing"));
-    return false;
-  }
-  if (typeof mesh === "string") return false;
-  const T = o.T_cam_obj[i], K = m.intrinsics, n = mesh.v.length / 3;
-  const X = new Float32Array(n * 3), U = new Float32Array(n * 2);
+// Smallest hand-object distance of one hand at chunk frame i, if below the contact threshold.
+function contactAt(ch, side, i) {
+  const D = ch.contact?.dist?.[side];
+  if (!D) return null;
+  let best = null;
+  D.forEach((row, o) => { const d = row[i]; if (d !== null && d < ch.contact.threshold && (!best || d < best.d)) best = { o, d }; });
+  return best;
+}
+
+// Ego4D FHO key frames: a banner on the frames within ±2 of a contact onset or PNR label.
+function drawKeyframes(ctx, f, m, dpr) {
+  if (!S.layers.keyframes || !S.keyframes.length) return;
+  const near = S.keyframes.filter((k) => Math.abs(k.f - f) <= 2);
+  const when = (k) => (k.f === f ? "" : k.f > f ? ` (in ${k.f - f} f)` : ` (${f - k.f} f ago)`);
+  near.forEach((k, j) => label(ctx, `◆ ${k.name}${when(k)} · ${k.label}`,
+    [12 * dpr, (48 + 18 * j) * dpr], k.color, dpr));
+}
+
+// Meshes: vertices in the camera frame -> projected, flat-shaded triangles collected into one
+// list, then painted back to front. Faces closer than 2 cm to the camera are dropped.
+function pushTris(tris, X, faces, K, s, h, sat) {
+  const n = X.length / 3, U = new Float32Array(n * 2);
   for (let k = 0; k < n; k++) {
-    const a = mesh.v[3 * k], b = mesh.v[3 * k + 1], c = mesh.v[3 * k + 2];
-    const x = T[0][0] * a + T[0][1] * b + T[0][2] * c + T[0][3];
-    const y = T[1][0] * a + T[1][1] * b + T[1][2] * c + T[1][3];
-    const z = T[2][0] * a + T[2][1] * b + T[2][2] * c + T[2][3];
-    X[3 * k] = x; X[3 * k + 1] = y; X[3 * k + 2] = z;
-    U[2 * k] = (K[0][0] * x / z + K[0][2]) * s; U[2 * k + 1] = (K[1][1] * y / z + K[1][2]) * s;
+    const z = X[3 * k + 2];
+    U[2 * k] = (K[0][0] * X[3 * k] / z + K[0][2]) * s; U[2 * k + 1] = (K[1][1] * X[3 * k + 1] / z + K[1][2]) * s;
   }
-  const nf = mesh.f.length / 3, order = [], depth = new Float32Array(nf), shade = new Float32Array(nf);
-  for (let j = 0; j < nf; j++) {
-    const p = 3 * mesh.f[3 * j], q = 3 * mesh.f[3 * j + 1], r = 3 * mesh.f[3 * j + 2];
+  for (let j = 0; j < faces.length / 3; j++) {
+    const a = faces[3 * j], b = faces[3 * j + 1], c = faces[3 * j + 2], p = 3 * a, q = 3 * b, r = 3 * c;
     if (X[p + 2] < 0.02 || X[q + 2] < 0.02 || X[r + 2] < 0.02) continue;
     const ux = X[q] - X[p], uy = X[q + 1] - X[p + 1], uz = X[q + 2] - X[p + 2];
     const vx = X[r] - X[p], vy = X[r + 1] - X[p + 1], vz = X[r + 2] - X[p + 2];
     const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
     const cx = (X[p] + X[q] + X[r]) / 3, cy = (X[p + 1] + X[q + 1] + X[r + 1]) / 3, cz = (X[p + 2] + X[q + 2] + X[r + 2]) / 3;
     const nn = Math.hypot(nx, ny, nz) * Math.hypot(cx, cy, cz) || 1;
-    depth[j] = cz; shade[j] = Math.abs(nx * cx + ny * cy + nz * cz) / nn; order.push(j);
+    tris.push({ d: cz, sh: Math.abs(nx * cx + ny * cy + nz * cz) / nn, U, a, b, c, h, sat });
   }
-  order.sort((a, b) => depth[b] - depth[a]);
-  const h = hue(o.label);
-  for (const j of order) {
-    const p = 2 * mesh.f[3 * j], q = 2 * mesh.f[3 * j + 1], r = 2 * mesh.f[3 * j + 2];
-    ctx.fillStyle = ctx.strokeStyle = `hsl(${h} 70% ${Math.round(25 + 50 * shade[j])}%)`;
-    ctx.beginPath(); ctx.moveTo(U[p], U[p + 1]); ctx.lineTo(U[q], U[q + 1]); ctx.lineTo(U[r], U[r + 1]); ctx.closePath();
+}
+function paintTris(ctx, tris) {
+  ctx.lineWidth = 0.6;
+  tris.sort((x, y) => y.d - x.d);
+  for (const t of tris) {
+    const U = t.U;
+    ctx.fillStyle = ctx.strokeStyle = `hsl(${t.h} ${t.sat}% ${Math.round(25 + 50 * t.sh)}%)`;
+    ctx.beginPath(); ctx.moveTo(U[2 * t.a], U[2 * t.a + 1]); ctx.lineTo(U[2 * t.b], U[2 * t.b + 1]); ctx.lineTo(U[2 * t.c], U[2 * t.c + 1]); ctx.closePath();
     ctx.fill(); ctx.stroke();  // stroke hides anti-aliasing seams between faces
   }
-  return order.length > 0;
+}
+
+// CAD mesh (object frame, fetched once per mesh) placed by T_cam_obj.
+function meshTris(tris, o, i, m, s) {
+  const key = `${m.dataset}:${o.mesh_path}`, mesh = S.meshes.get(key);
+  if (!mesh) {
+    S.meshes.set(key, "pending");
+    api(`/api/mesh/${m.dataset}?path=${encodeURIComponent(o.mesh_path)}`)
+      .then((r) => { S.meshes.set(key, { v: Float32Array.from(r.vertices), f: Uint32Array.from(r.faces) }); draw(); })
+      .catch(() => S.meshes.set(key, "missing"));
+    return;
+  }
+  if (typeof mesh === "string") return;
+  const T = o.T_cam_obj[i], n = mesh.v.length / 3, X = new Float32Array(n * 3);
+  for (let k = 0; k < n; k++) {
+    const a = mesh.v[3 * k], b = mesh.v[3 * k + 1], c = mesh.v[3 * k + 2];
+    for (let r = 0; r < 3; r++) X[3 * k + r] = T[r][0] * a + T[r][1] * b + T[r][2] * c + T[r][3];
+  }
+  pushTris(tris, X, mesh.f, m.intrinsics, s, hue(o.label), 70);
+}
+
+// MANO hand mesh: per chunk, int16 (2, T, 778, 3) camera-frame vertices in 0.1 mm from the server.
+function handMeshChunk(ch) {
+  const m = S.seq.meta, hm = S.handMesh.get(ch.start);
+  if (hm !== undefined) return typeof hm === "string" ? null : hm;
+  S.handMesh.set(ch.start, "pending");
+  const sid = m.sequence_id, mine = S.handMesh;
+  (S.handFaces ? Promise.resolve() : api("/api/hand_faces").then((r) => { S.handFaces = { left: Uint32Array.from(r.left), right: Uint32Array.from(r.right) }; }))
+    .then(() => fetch(`/api/sequence/${m.dataset}/${encodeURIComponent(sid)}/handmesh?start=${ch.start}&end=${ch.end}`))
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+    .then((b) => { mine.set(ch.start, new Int16Array(b)); if (S.handMesh === mine) draw(); })
+    .catch(() => mine.set(ch.start, "missing"));
+  return null;
+}
+function handTris(tris, ch, i, m, s, touch) {
+  const V = handMeshChunk(ch);
+  if (!V || !S.handFaces) return;
+  const T = V.length / (2 * MANO_V * 3);
+  HAND_SIDES.forEach((side, si) => {
+    const off = (si * T + i) * MANO_V * 3;
+    if (V[off] === -32768) return;
+    const X = new Float32Array(MANO_V * 3);
+    for (let k = 0; k < X.length; k++) X[k] = V[off + k] * 1e-4;
+    const [h, sat] = touch[side] ? [340, 90] : side === "left" ? [197, 85] : [22, 85];
+    pushTris(tris, X, S.handFaces[side], m.intrinsics, s, h, sat);
+  });
+}
+
+// Static scene cloud (HOI4D 3Dseg, world frame) projected with the frame's camera pose into a
+// half-resolution z-buffered image; coloured by semantic label.
+function ensureScene() {
+  const m = S.seq.meta;
+  if (S.scene) return;
+  S.scene = "pending";
+  const sid = m.sequence_id;
+  fetch(`/api/scene/${m.dataset}/${encodeURIComponent(sid)}?n=60000`)
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.arrayBuffer(); })
+    .then((b) => {
+      const N = new Uint32Array(b, 0, 1)[0];
+      const sc = { N, xyz: new Float32Array(b, 4, 3 * N), label: new Int16Array(b, 4 + 12 * N, N), rgb: new Uint8Array(b, 4 + 14 * N, 3 * N) };
+      sc.color = new Uint8Array(3 * N);
+      for (let k = 0; k < N; k++) {
+        const [r, g, bl] = hslRgb((sc.label[k] * 137.508) % 360, 0.75, 0.55);
+        sc.color[3 * k] = r; sc.color[3 * k + 1] = g; sc.color[3 * k + 2] = bl;
+      }
+      if (S.seq?.meta.sequence_id === sid) { S.scene = sc; draw(); }
+    })
+    .catch(() => { if (S.seq?.meta.sequence_id === sid) S.scene = "missing"; });
+}
+function hslRgb(h, sat, l) {
+  const k = (n) => (n + h / 30) % 12, a = sat * Math.min(l, 1 - l);
+  const f = (n) => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1))));
+  return [f(0), f(8), f(4)];
+}
+function drawScene(ctx, ch, i, m, s) {
+  const Tc = ch.T_cam_world?.[i];
+  if (!Tc || Tc[0][0] === null) return;
+  ensureScene();
+  const sc = S.scene;
+  if (!sc || typeof sc === "string") return;
+  const cv = ctx.canvas, W = Math.ceil(cv.width / 2), H = Math.ceil(cv.height / 2);
+  let B = S.sceneBuf;
+  if (!B || B.W !== W || B.H !== H) {
+    const off = document.createElement("canvas"); off.width = W; off.height = H;
+    B = S.sceneBuf = { W, H, off, img: new ImageData(W, H), z: new Float32Array(W * H) };
+  }
+  B.z.fill(Infinity); B.img.data.fill(0);
+  const K = m.intrinsics, f = s / 2, X = sc.xyz, D = B.img.data, Z = B.z;
+  for (let k = 0; k < sc.N; k++) {
+    const a = X[3 * k], b = X[3 * k + 1], c = X[3 * k + 2];
+    const z = Tc[2][0] * a + Tc[2][1] * b + Tc[2][2] * c + Tc[2][3];
+    if (z < 0.05) continue;
+    const x = Tc[0][0] * a + Tc[0][1] * b + Tc[0][2] * c + Tc[0][3], y = Tc[1][0] * a + Tc[1][1] * b + Tc[1][2] * c + Tc[1][3];
+    const u = Math.floor((K[0][0] * x / z + K[0][2]) * f), v = Math.floor((K[1][1] * y / z + K[1][2]) * f);
+    for (let dv = 0; dv < 2; dv++) for (let du = 0; du < 2; du++) {
+      const uu = u + du, vv = v + dv;
+      if (uu < 0 || vv < 0 || uu >= W || vv >= H) continue;
+      const p = vv * W + uu;
+      if (z >= Z[p]) continue;
+      Z[p] = z; D[4 * p] = sc.color[3 * k]; D[4 * p + 1] = sc.color[3 * k + 1]; D[4 * p + 2] = sc.color[3 * k + 2]; D[4 * p + 3] = 255;
+    }
+  }
+  B.off.getContext("2d").putImageData(B.img, 0, 0);
+  ctx.globalAlpha = 0.5; ctx.imageSmoothingEnabled = false; ctx.drawImage(B.off, 0, 0, cv.width, cv.height); ctx.globalAlpha = 1;
 }
 
 function drawGaze(ctx, ch, i, s, dpr) {

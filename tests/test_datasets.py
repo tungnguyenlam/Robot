@@ -150,3 +150,47 @@ def test_ego4d_fho_boxes():
     assert np.isnan(h.bbox_2d[0]).all() and np.isnan(h.bbox_2d[2]).all()   # sparse: key frames only
     x0, y0, x1, y1 = b["xyxy"]
     assert 0 <= x0 < x1 <= m.width + 2 and 0 <= y0 < y1 <= m.height + 2
+
+
+@require_index("ego4d")
+def test_ego4d_fho_keyframes():
+    import json
+
+    from egograph.data.contact import fho_keyframes
+    from egograph.paths import cache_root
+
+    L = EgoLoader(modalities=["rgb"])
+    m = next(x for x in L.index("ego4d").metas if "keyframes" in x.modalities)
+    acts = json.loads((cache_root("ego4d") / "ann" / f"{m.sequence_id}.json").read_text())["actions"]
+    cf = next(a["critical_frames"] for a in acts if (a.get("critical_frames") or {}).get("contact_frame"))
+    f = int(cf["contact_frame"])
+    c = L.load_clip("ego4d", m.sequence_id, range(f - 5, f + 6), with_frames=False)
+    kf, labelled = fho_keyframes(c.annotations)
+    assert labelled and kf[0, 5]                       # contact onset lands on its own frame
+
+
+@require_index("hoi4d")
+def test_viewer_hand_mesh_contact_scene():
+    pytest.importorskip("smplx")
+    from fastapi.testclient import TestClient
+
+    from egograph.viewer.app import create_app
+
+    L = EgoLoader(modalities=["rgb"])
+    m = next(x for x in L.index("hoi4d").metas if "contact" in x.modalities and "scene" in x.modalities)
+    c = TestClient(create_app())
+    base = f"/api/sequence/hoi4d/{m.sequence_id}"
+    a = c.get(f"{base}/annotations?start=0&end=30").json()
+    assert a["contact"] is not None and len(a["T_cam_world"]) == 30
+    side = next(s for s in ("right", "left") if s in a["hands"] and any(a["hands"][s]["valid"]))
+    raw = c.get(f"{base}/handmesh?start=0&end=30").content
+    V = np.frombuffer(raw, "<i2").reshape(2, 30, 778, 3)
+    s = ("left", "right").index(side)
+    t = a["hands"][side]["valid"].index(True)
+    # the mesh's wrist region sits within a few cm of the labelled 3D wrist (same MANO params)
+    verts = V[s, t].astype(np.float32) * 1e-4
+    wrist = L.adapter("hoi4d").load_annotations(m, [t]).hands[side].joints_3d[0, 0]
+    assert np.linalg.norm(verts - wrist, axis=1).min() < 0.03
+    sc = c.get(f"/api/scene/hoi4d/{m.sequence_id}?n=5000").content
+    N = int(np.frombuffer(sc[:4], "<u4")[0])
+    assert N == 5000 and len(sc) == 4 + 17 * N

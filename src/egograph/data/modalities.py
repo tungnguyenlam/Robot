@@ -44,6 +44,8 @@ MODALITIES: dict[str, Modality] = {m.name: m for m in [
              "object (part) meshes in the frame of T_cam_obj: simplified mesh + surface samples"),
     Modality("contact", "frame", True, "contact (2,O,T) bool, contact_dist (2,O,T) metres",
              "hand-object proximity derived from 3D joints and object boxes"),
+    Modality("keyframes", "frame", True, "keyframe (2,T) bool [contact onset, PNR], keyframe_valid",
+             "labelled contact-onset and point-of-no-return frames of FHO actions (Ego4D)"),
     Modality("hand_pose", "label", False, "hand_valid, hand_joints_2d/3d, hand_mano",
              "MANO parameters, 3D joints, and 2D keypoints per hand"),
     Modality("hand_box", "label", False, "hand_bbox_2d (2,T,4)",

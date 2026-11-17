@@ -139,6 +139,10 @@ class Ego4DAdapter(DatasetAdapter):
                 m.modalities.append("actions")
             if any(a.get("boxes") for a in ann["actions"]):
                 m.modalities += ["hand_box", "object_box"]
+            if any(a.get("critical_frames") for a in ann["actions"]):
+                m.modalities.append("keyframes")
+                m.tags["num_contact_frames"] = sum(1 for a in ann["actions"]
+                                                   if (a.get("critical_frames") or {}).get("contact_frame") is not None)
             yield m
 
     # ---- annotation cache --------------------------------------------------------------

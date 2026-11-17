@@ -34,23 +34,24 @@ the overlap with EgoGrasp; we use it as our 3D ground truth.
 
 ## 2. Coverage per dataset
 
-Run `egograph modalities` for live counts. As of 2026-11-16:
+Run `egograph modalities` for live counts. As of 2026-11-18:
 
-| Modality | HOI4D (2973) | EPIC-KITCHENS (156) | Ego4D (278 downloaded) |
+| Modality | HOI4D (2973) | EPIC-KITCHENS (156) | Ego4D (831 downloaded) |
 |---|---|---|---|
 | `rgb` | all | all | all |
 | `depth` | 2973 | – | – |
 | `seg` | 2972 | – (VISOR not downloaded) | – |
-| `audio` | – (silent videos) | 156 | 175 |
+| `audio` | – (silent videos) | 156 | 541 |
 | `imu` | – | 142 (GoPro, camera frame) | 67 (device frame) |
 | `gaze` | – | – | 1 |
 | `scene` | 2973 | – | – |
 | `mesh` | 2967 (CAD; every rigid object, all articulated parts) | – | – |
 | `intrinsics`, `camera_pose`, `object_pose` | all | – | – |
 | `hand_pose` | 1685 | – | – |
-| `hand_box`, `object_box` | object_box: all | – (hand-object detections not downloaded) | 33 (FHO key frames) |
+| `hand_box`, `object_box` | object_box: all | – (hand-object detections not downloaded) | 586 (FHO key frames) |
 | `contact` (derived) | 1685 | – | – |
-| `actions` | all | all | 254 (narrations and/or FHO) |
+| `keyframes` (contact onset, PNR) | – | – | 587 (FHO labels) |
+| `actions` | all | all | 807 (narrations and/or FHO) |
 
 HOI4D CAD models are in `data/HOI4D/HOI4D_CAD_Model_for_release/` and load as the `mesh`
 modality (section 3). Still missing: EPIC VISOR masks and hand-object detections, and Ego4D
@@ -155,6 +156,15 @@ computes the signed distance from each hand's 21 3D joints to each object's orie
 their action labels: carry/pick-up/put-down 98–99% in contact, grasp 92%, reach-out 26%,
 stop 32%, rest 0%. Boxes are amodal and joints lie under the skin, so this is a proxy.
 
+**Ego4D contact timing (`keyframes`).** FHO's critical frames are real human labels: the
+frame where the hand first touches the object (`contact_frame`, on about half of the actions)
+and the point of no return where the object changes state (`pnr_frame`, on all of them).
+`fho_keyframes` in `contact.py` puts each on the nearest clip frame within half a frame step,
+as `keyframe (2,T)` [contact onset, PNR]. `keyframe_valid` is False when no action in the window
+has critical frames, so an all-False row then means unknown, not "no contact".
+`fho_oscc-pnr_*.json` is not loaded: on our 831 videos its 65k state-change clips repeat
+`fho_main`'s PNR frames (98% exact match); only its 12k "no state change" negatives are new.
+
 ## 4. Using them
 
 ```python
@@ -192,6 +202,7 @@ keys, always with the same shape so mixed-dataset batches collate:
 | `scene_points`, `scene_valid` | (B,N,6), (B,) | xyz (world) + rgb/255, N = `scene_points` |
 | `object_points`, `object_points_valid` | (B,O,P,6), (B,O) | surface xyz + normal in each object's frame (map with `obj_T_cam_obj`), P = `mesh_points` (1024) |
 | `contact`, `contact_dist`, `contact_valid` | (B,2,O,T) | hand × object × time |
+| `keyframe`, `keyframe_valid` | (B,2,T), (B,) | Ego4D FHO [contact onset, PNR] on their clip frames |
 
 Missing values are 0 in tensors. Always mask with the `*_valid` flags.
 
@@ -208,3 +219,16 @@ sequence it shows modality badges, dashed modality filter chips in the sidebar, 
 (Ego4D FHO), a gaze ring, an IMU plot with a playhead, depth or mask overlays when paused
 (layer buttons "depth (paused)" / "masks (paused)"), and for HOI4D the CAD mesh of each object
 or part, posed by `T_cam_obj` and shaded (layer "object mesh (CAD)", from `/api/mesh/hoi4d`).
+
+Added 2026-11-18:
+- **hand mesh (MANO)**: the 778-vertex MANO surface from the labelled parameters
+  (`/api/sequence/{ds}/{sid}/handmesh`, int16 0.1 mm), painted in one depth sort with the CAD
+  meshes so hands occlude objects correctly. It turns pink while the hand is in contact.
+- **contact (derived)**: the same distance and 1 cm threshold as the `contact` tensors. A hand
+  in contact is labelled with the object and distance, the object's box turns pink, and a pink
+  lane under the timeline marks contact frames.
+- **contact / PNR frames** (Ego4D): yellow (contact onset) and red (PNR) ticks on the timeline,
+  and a banner within ±2 frames of each.
+- **scene cloud** (HOI4D, off by default): 60k points of the 3Dseg cloud projected with the
+  frame's camera pose, z-buffered, coloured by semantic label. The ~1 in 5 misregistered
+  sequences (section 3) are obvious here, e.g. `ZY20210800001-H1-C1-N19-S100-s02-T1`.

@@ -20,7 +20,11 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from egograph.data.contact import DEFAULT_THRESHOLD_M, hand_object_contact
+from egograph.data.contact import (
+    DEFAULT_THRESHOLD_M,
+    fho_keyframes,
+    hand_object_contact,
+)
 from egograph.data.loader import ClipWindow, EgoLoader, sample_windows
 from egograph.data.modalities import check
 from egograph.data.schema import HAND_SIDES, Clip
@@ -156,6 +160,10 @@ def clip_to_tensors(clip: Clip, max_objects: int = 4, modalities: set[str] | Non
         out["contact"] = torch.from_numpy(c)                                                   # (2, O, T)
         out["contact_dist"] = _f32(dist)                                                       # (2, O, T) m
         out["contact_valid"] = torch.from_numpy(np.isfinite(dist))
+    if "keyframes" in want:
+        kf, labelled = fho_keyframes(a)
+        out["keyframe"] = torch.from_numpy(kf)                                                 # (2, T) contact, PNR
+        out["keyframe_valid"] = torch.tensor(labelled)
     return out
 
 

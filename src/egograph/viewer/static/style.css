@@ -141,3 +141,5 @@ kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line)
   .panels { grid-template-columns: 1fr; }
   .kbd-hint { display: none; }
 }
+.tl-key { position: absolute; top: -4px; bottom: -14px; width: 2px; margin-left: -1px; opacity: .9; pointer-events: auto; }
+.timeline.hide-keys .tl-key { display: none; }

@@ -104,7 +104,7 @@ the default collate works. B is the batch size, T the frame count, and O = `max_
 | `dataset`, `sequence_id`, `action` | lists of str | |
 
 With `data.modalities` set, the batch also has `depth`, `seg`, `audio`, `imu`, `gravity_cam`,
-`gaze_2d`, `scene_points`, `object_points` and `contact*`, each with a `*_valid` flag. The table is in
+`gaze_2d`, `scene_points`, `object_points`, `contact*` and `keyframe`, each with a `*_valid` flag. The table is in
 [MODALITIES.md](MODALITIES.md#4-using-them). `frames` is present only when `rgb` is requested.
 
 NaNs are replaced with 0 in tensors, so always mask with the `*_valid` flags.
