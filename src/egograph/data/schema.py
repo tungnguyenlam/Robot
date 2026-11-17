@@ -197,6 +197,22 @@ class ScenePoints:
 
 
 @dataclass
+class ObjectMesh:
+    """Triangle mesh of one object (or one articulated part) in its own frame, the frame of
+    ``ObjectTrack.T_cam_obj``: ``T_cam_obj @ [v, 1]`` puts a vertex in the camera frame.
+
+    ``vertices``/``faces`` are simplified for drawing (see egograph.data.mesh); ``points`` and
+    ``normals`` are an area-weighted sample of the full-resolution surface, in random order, so
+    the first n rows are themselves a uniform sample."""
+
+    vertices: np.ndarray        # (V, 3) float32 metres
+    faces: np.ndarray           # (F, 3) int32
+    points: np.ndarray          # (P, 3) float32 surface samples
+    normals: np.ndarray         # (P, 3) float32 unit outward normals at ``points``
+    source: str = ""            # path of the source mesh, relative to the dataset root
+
+
+@dataclass
 class Annotations:
     """Everything known about frames ``frame_indices`` of a sequence."""
 
@@ -286,6 +302,7 @@ class Clip:
     audio: np.ndarray | None = None      # (S, C) float32 in [-1, 1], from the first frame's timestamp on
     audio_sr: int | None = None          # audio sample rate in Hz
     scene: ScenePoints | None = None     # static point cloud of the whole sequence (world frame)
+    meshes: dict[str, ObjectMesh] | None = None  # object_id -> mesh in that object's frame
 
     def save(self, out_dir: str | Path, frame_format: str = "jpg", jpeg_quality: int = 92) -> Path:
         """Write the clip in the on-disk standard format (see docs/DATA_FORMAT.md)."""
@@ -326,6 +343,12 @@ class Clip:
                 extra["scene_instance"] = self.scene.instance
         if extra:
             np.savez_compressed(out / "extra.npz", **extra)
+        if self.meshes:
+            mdir = out / "meshes"
+            mdir.mkdir(exist_ok=True)
+            for oid, m in self.meshes.items():
+                np.savez_compressed(mdir / f"{oid}.npz", vertices=m.vertices, faces=m.faces, points=m.points,
+                                    normals=m.normals, source=np.array(m.source))
         meta = {
             "schema": SCHEMA_VERSION,
             "source": self.meta.to_dict(),
@@ -336,6 +359,7 @@ class Clip:
             "depth": self.depth is not None,
             "seg": self.seg is not None,
             "audio_sr": self.audio_sr if self.audio is not None else None,
+            "meshes": sorted(self.meshes) if self.meshes else None,
             **sidecar,
         }
         (out / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
@@ -370,6 +394,12 @@ class Clip:
                 if "scene_xyz" in z.files:
                     scene = ScenePoints(z["scene_xyz"], z["scene_rgb"], z["scene_label"],
                                         z["scene_instance"] if "scene_instance" in z.files else None)
+        meshes = None
+        if meta.get("meshes"):
+            meshes = {}
+            for oid in meta["meshes"]:
+                with np.load(d / "meshes" / f"{oid}.npz") as z:
+                    meshes[oid] = ObjectMesh(z["vertices"], z["faces"], z["points"], z["normals"], str(z["source"]))
         K = None if meta.get("K") is None else np.asarray(meta["K"], dtype=np.float32)
         return cls(SequenceMeta.from_dict(meta["source"]), frames, K, ann, depth=depth, seg=seg,
-                   audio=audio, audio_sr=meta.get("audio_sr"), scene=scene)
+                   audio=audio, audio_sr=meta.get("audio_sr"), scene=scene, meshes=meshes)

@@ -38,20 +38,27 @@ def cmd_index(args: argparse.Namespace) -> None:
 
 
 def cmd_prepare(args: argparse.Namespace) -> None:
-    """Fill per-sequence caches that are slow to build on first access (EPIC IMU parsing reads
-    the whole video file). Safe to interrupt and rerun: finished sequences are skipped."""
+    """Fill per-sequence caches that are slow to build on first access: EPIC IMU (parsing reads
+    the whole video file) and object meshes (HOI4D CAD parsing, simplification and surface
+    sampling). Safe to interrupt and rerun: finished items are skipped."""
     from concurrent.futures import ThreadPoolExecutor
 
-    ad = get_adapter(args.dataset)
-    metas = [m for m in SequenceIndex.load(args.dataset).metas if "imu" in m.modalities]
+    ad = get_adapter(args.dataset, **({"mano": False} if args.dataset == "hoi4d" else {}))
+    metas = [m for m in SequenceIndex.load(args.dataset).metas if {"imu", "mesh"} & set(m.modalities)]
 
     def one(m):
-        t = ad.load_imu(m)
-        return m.sequence_id, (len(t.t) if t is not None else 0)
+        out = []
+        if "imu" in m.modalities:
+            t = ad.load_imu(m)
+            out.append(f"{len(t.t) if t is not None else 0} IMU samples")
+        if "mesh" in m.modalities:
+            ms = ad.load_meshes(m, ad.load_annotations(m, [0])) or {}
+            out.append(f"{len(ms)} meshes")
+        return m.sequence_id, ", ".join(out)
 
     with ThreadPoolExecutor(args.workers) as pool:
-        for k, (sid, n) in enumerate(pool.map(one, metas)):
-            print(f"[{k + 1}/{len(metas)}] {sid}: {n} IMU samples", flush=True)
+        for k, (sid, msg) in enumerate(pool.map(one, metas)):
+            print(f"[{k + 1}/{len(metas)}] {sid}: {msg}", flush=True)
 
 
 def cmd_modalities(args: argparse.Namespace) -> None:
@@ -125,7 +132,7 @@ def main(argv: list[str] | None = None) -> None:
                    help="on-request modalities to export, e.g. rgb depth seg audio imu gaze scene")
     s.set_defaults(fn=cmd_export)
 
-    s = sub.add_parser("prepare", help="pre-build slow per-sequence caches (EPIC GoPro IMU)")
+    s = sub.add_parser("prepare", help="pre-build slow per-sequence caches (EPIC GoPro IMU, HOI4D meshes)")
     s.add_argument("--dataset", default="epic_kitchens", choices=list(ADAPTERS))
     s.add_argument("--workers", type=int, default=2, help="parallel files (the data disk is an HDD)")
     s.set_defaults(fn=cmd_prepare)

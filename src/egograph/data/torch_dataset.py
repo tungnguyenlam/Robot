@@ -33,18 +33,19 @@ def _f32(x) -> torch.Tensor:
 
 def clip_to_tensors(clip: Clip, max_objects: int = 4, modalities: set[str] | None = None,
                     audio_samples: int | None = None, scene_points: int = 8192,
-                    contact_threshold: float = DEFAULT_THRESHOLD_M) -> dict[str, Any]:
+                    contact_threshold: float = DEFAULT_THRESHOLD_M, mesh_points: int = 1024) -> dict[str, Any]:
     """Convert a ``Clip`` to a dict of fixed-shape tensors.
 
     ``modalities`` lists the on-request modalities to emit (default: the ones present in
     the clip). ``audio_samples`` fixes the audio length (pad or cut); ``scene_points`` is the
-    number of scene points sampled per clip.
+    number of scene points sampled per clip; ``mesh_points`` the surface samples per object.
     """
     a = clip.annotations
     T = a.num_frames
     want = set(modalities) if modalities is not None else {
         k for k, v in (("rgb", clip.frames), ("depth", clip.depth), ("seg", clip.seg), ("audio", clip.audio),
-                       ("imu", a.imu), ("gaze", a.gaze_2d), ("scene", clip.scene)) if v is not None}
+                       ("imu", a.imu), ("gaze", a.gaze_2d), ("scene", clip.scene),
+                       ("mesh", clip.meshes)) if v is not None}
     hands = [a.hands[s] for s in HAND_SIDES]
     O = max_objects
     obj_pose = np.zeros((O, T, 4, 4), np.float32)
@@ -135,6 +136,18 @@ def clip_to_tensors(clip: Clip, max_objects: int = 4, modalities: set[str] | Non
             pts[:, 3:] = clip.scene.rgb[idx] / 255.0
         out["scene_points"] = torch.from_numpy(pts)                                            # (N, 6) xyz rgb
         out["scene_valid"] = torch.tensor(clip.scene is not None)
+    if "mesh" in want:
+        pts = np.zeros((O, mesh_points, 6), np.float32)
+        ok = np.zeros(O, bool)
+        for k, o in enumerate(a.objects[:O]):
+            m = (clip.meshes or {}).get(o.object_id)
+            if m is None or not len(m.points):
+                continue
+            idx = np.arange(mesh_points) % len(m.points)  # stored in random order: a prefix is uniform
+            pts[k, :, :3], pts[k, :, 3:] = m.points[idx], m.normals[idx]
+            ok[k] = True
+        out["object_points"] = torch.from_numpy(pts)                                           # (O, P, 6) obj frame
+        out["object_points_valid"] = torch.from_numpy(ok)                                      # (O,)
     if "contact" in want:
         c = np.zeros((2, O, T), bool)
         dist = np.full((2, O, T), np.nan, np.float32)
@@ -149,7 +162,7 @@ def clip_to_tensors(clip: Clip, max_objects: int = 4, modalities: set[str] | Non
 class EgoClipDataset(Dataset):
     def __init__(self, windows: list[ClipWindow], loader: EgoLoader, with_frames: bool | None = None,
                  max_objects: int = 4, audio_samples: int | None = None, scene_points: int = 8192,
-                 contact_threshold: float = DEFAULT_THRESHOLD_M):
+                 contact_threshold: float = DEFAULT_THRESHOLD_M, mesh_points: int = 1024):
         self.windows = windows
         self.loader = loader
         if with_frames is not None:  # backward compatibility with the v1 signature
@@ -159,6 +172,7 @@ class EgoClipDataset(Dataset):
         self.audio_samples = audio_samples
         self.scene_points = scene_points
         self.contact_threshold = contact_threshold
+        self.mesh_points = mesh_points
 
     def __len__(self) -> int:
         return len(self.windows)
@@ -166,7 +180,7 @@ class EgoClipDataset(Dataset):
     def __getitem__(self, i: int) -> dict[str, Any]:
         clip = self.loader.load_window(self.windows[i])
         return clip_to_tensors(clip, self.max_objects, self.modalities, self.audio_samples,
-                               self.scene_points, self.contact_threshold)
+                               self.scene_points, self.contact_threshold, self.mesh_points)
 
     @classmethod
     def from_config(cls, cfg: dict[str, Any]) -> "EgoClipDataset":
@@ -200,4 +214,5 @@ class EgoClipDataset(Dataset):
             audio_samples = int(round(cfg["clip_len"] / float(cfg["fps"]) * loader.audio_sr))
         return cls(windows, loader, max_objects=cfg.get("max_objects", 4), audio_samples=audio_samples,
                    scene_points=int(cfg.get("scene_points", 8192)),
-                   contact_threshold=float(cfg.get("contact_threshold", DEFAULT_THRESHOLD_M)))
+                   contact_threshold=float(cfg.get("contact_threshold", DEFAULT_THRESHOLD_M)),
+                   mesh_points=int(cfg.get("mesh_points", 1024)))

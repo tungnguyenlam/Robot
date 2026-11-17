@@ -4,9 +4,9 @@
 _base_: ../data/base.yaml
 name: all_modalities
 data:
-  modalities: [rgb, depth, seg, audio, imu, gaze, scene, contact]
+  modalities: [rgb, depth, seg, audio, imu, gaze, scene, mesh, contact]
   sources:
-    - dataset: hoi4d          # depth, masks, scene cloud, 3D hands/objects, contact proxy
+    - dataset: hoi4d          # depth, masks, scene cloud, CAD meshes, 3D hands/objects, contact
       require: [has_hand_pose, has_object_pose]
       require_modalities: [depth]
       tags: {rigid: true}

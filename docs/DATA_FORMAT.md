@@ -1,7 +1,7 @@
 # egoformat-v1.1: the standard egocentric hand-object format
 
 v1.1 (2026-11-16) adds optional modalities: depth, masks, audio, IMU, gaze, a scene point
-cloud, and hand 2D boxes. v1 clips still load. What each modality is, where it comes from,
+cloud, and hand 2D boxes; 2026-11-17 adds object meshes (`Clip.meshes`). v1 clips still load. What each modality is, where it comes from,
 and how it was checked: [MODALITIES.md](MODALITIES.md).
 
 Every dataset adapter, pose extractor (Month 2), and model (Month 3+) reads and writes this
@@ -41,6 +41,9 @@ Clip
 ├── seg:   (T,H,W) uint8 instance ids (0 = background), or None
 ├── audio: (S,C) float32 from the first frame's time, audio_sr: int, or None
 ├── scene: ScenePoints(xyz (N,3) world, rgb (N,3), label (N,), instance), or None
+├── meshes: {object_id: ObjectMesh}, or None    each in its object's frame (apply T_cam_obj)
+│     vertices (V,3), faces (F,3) simplified (~3k faces, for drawing);
+│     points (8192,3), normals (8192,3) area-weighted samples of the full mesh; source (path)
 └── annotations: Annotations
     ├── frame_indices (T,) int64      source frame numbers
     ├── timestamps    (T,) float64    seconds
@@ -50,7 +53,7 @@ Clip
     │     mano_pose (T,48), mano_betas (T,10), mano_trans (T,3), bbox_2d (T,4) xyxy
     ├── objects[]: ObjectTrack
     │     object_id, label, valid (T,), T_cam_obj (T,4,4), bbox_2d (T,4) xyxy,
-    │     dimensions (3,), mesh_path
+    │     dimensions (3,), mesh_path (relative to the dataset root, or None)
     ├── actions[]: ActionSegment(start_s, end_s, label, verb, noun, extra)
     ├── gaze_2d (T,2) pixels, or None
     └── imu: ImuTrack(t (N,), accel (N,3), gyro (N,3), frame "camera"|"device"), or None
@@ -68,6 +71,7 @@ Clip
 │                      hand_{left,right}_{valid,joints_2d,joints_3d,mano_pose,mano_betas,mano_trans,bbox_2d},
 │                      obj{i}_{valid,T_cam_obj,bbox_2d,dimensions}, gaze_2d, imu_{t,accel,gyro}
 ├── extra.npz          audio, scene_{xyz,rgb,label,instance}      (only if present)
+├── meshes/<object_id>.npz  vertices, faces, points, normals, source (only if present)
 ├── frames/000000.jpg …
 ├── depth/000000.png … 16-bit millimetres (HOI4D's native encoding)
 └── seg/000000.png …   8-bit instance ids
@@ -100,7 +104,7 @@ the default collate works. B is the batch size, T the frame count, and O = `max_
 | `dataset`, `sequence_id`, `action` | lists of str | |
 
 With `data.modalities` set, the batch also has `depth`, `seg`, `audio`, `imu`, `gravity_cam`,
-`gaze_2d`, `scene_points` and `contact*`, each with a `*_valid` flag. The table is in
+`gaze_2d`, `scene_points`, `object_points` and `contact*`, each with a `*_valid` flag. The table is in
 [MODALITIES.md](MODALITIES.md#4-using-them). `frames` is present only when `rgb` is requested.
 
 NaNs are replaced with 0 in tensors, so always mask with the `*_valid` flags.

@@ -20,6 +20,8 @@ Other modalities inside the MP4 files:
 from __future__ import annotations
 
 import csv
+import os
+import threading
 from collections import defaultdict
 from collections.abc import Iterator
 from functools import cached_property
@@ -140,7 +142,7 @@ class EpicKitchensAdapter(DatasetAdapter):
             if d is None:
                 return None
             cache.parent.mkdir(parents=True, exist_ok=True)
-            tmp = cache.with_suffix(".tmp.npz")
+            tmp = cache.with_suffix(f".{os.getpid()}-{threading.get_ident()}.tmp.npz")  # unique per writer
             np.savez_compressed(tmp, **d)
             tmp.replace(cache)
         with np.load(cache) as z:

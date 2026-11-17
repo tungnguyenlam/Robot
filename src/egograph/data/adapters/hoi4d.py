@@ -8,6 +8,8 @@ Layout under ``$EGO_DATA_ROOT/HOI4D`` (as downloaded and extracted on amdserver)
     HOI4D_annotations/<seq>/3Dseg/output.log         # camera trajectory (Open3D .log)
     Hand_pose/handpose_{left,right}_hand/<seq>/<frame>.pickle   # MANO poseCoeff/beta/trans/kps2D
     camera_params/<ZY...>/intrin.npy                 # 3x3 K per capture device
+    HOI4D_CAD_Model_for_release/rigid/<Category>/<NNN>.obj            # one mesh per instance
+    HOI4D_CAD_Model_for_release/articulated/<Category>/<NNN>/objs/new-<k>-align.obj  # one per part
     HOI4D_depth_video/<seq>/align_depth/depth_video.avi   # FFV1 gray16le, mm, registered to RGB
     HOI4D_annotations/<seq>/2Dseg/{mask,shift_mask}/<frame:05d>.png   # 2D instance masks
     HOI4D_annotations/<seq>/3Dseg/label.pcd           # labelled static point cloud (world frame)
@@ -20,6 +22,10 @@ Conventions, checked against the data with tests/test_hoi4d_conventions.py (2026
   camera frame in meters, and ``dimensions`` (length, width, height) are the extents along
   the object x, y, and z axes. The projected 3D box matches the annotated 2D box with mean
   IoU 0.945 over 140 samples; the next-best convention scores 0.71.
+* CAD meshes are in the object frame of objpose: a rigid mesh is centred at the origin and its
+  extents along x, y, z match ``dimensions`` (l, w, h) to a few mm. Articulated objects have one
+  ``-align`` mesh per part in that part's box frame; ``result.json`` names the parts, and
+  ``_match_parts`` pairs them with the annotated part labels (see docs/MODALITIES.md).
 * hand ``poseCoeff`` is 48-D axis-angle (no PCA, flat_hand_mean=True) and ``trans`` is in
   the camera frame. ``kps2D`` is in the 21-joint OpenPose order. Projected MANO joints are
   0.7 px (right) and 0.85 px (left) from kps2D (median). With flat_hand_mean=False the error
@@ -51,7 +57,8 @@ from scipy.spatial.transform import Rotation
 
 from egograph.data.adapters.base import DatasetAdapter, overlapping, register
 from egograph.data.geometry import make_T
-from egograph.data.schema import ActionSegment, Annotations, ObjectTrack, ScenePoints, SequenceMeta
+from egograph.data.schema import (ActionSegment, Annotations, ObjectMesh, ObjectTrack, ScenePoints,
+                                  SequenceMeta)
 from egograph.data.video import probe
 
 CATEGORIES = {
@@ -63,6 +70,18 @@ CATEGORIES = {
 RIGID = {"ToyCar", "Mug", "Bottle", "Bowl", "Kettle", "Knife"}
 
 HOI4D_FPS = 15.0
+CAD_DIR = "HOI4D_CAD_Model_for_release"
+
+# Annotated part label (lower case) -> words that the matching CAD part name contains.
+# Labels not listed here (scissors/scissors2, the lamp joints) are matched by box extents alone.
+PART_WORDS = {
+    "laptopdisplay": ("screen",), "laptopkeyboard": ("base",),
+    "lockerbody": ("panel", "body", "frame", "base"), "lockerdrawer": ("drawer",),
+    "lockersldingdoor": ("door",), "safebox": ("frame", "body"), "safedoor": ("door",),
+    "bucket": ("body",), "buckethandle": ("handle",), "dustbinbase": ("body", "base"),
+    "dustbincover": ("lid", "cover"), "staplerbase": ("body", "base"), "staplercover": ("lid", "cover"),
+    "pliersleft": ("left",), "pliersright": ("right",), "lampbase": ("base",),
+}
 
 
 def voc_palette(n: int = 256) -> np.ndarray:
@@ -202,6 +221,7 @@ class HOI4DAdapter(DatasetAdapter):
             "actions": (ann / "action" / "color.json").exists(),
             "depth": self._depth_path(rel).exists(), "seg": self._seg_dir(rel) is not None,
             "scene": (ann / "3Dseg" / "label.pcd").exists(),
+            "mesh": self._cad_path(cname, inst) is not None,
         }
         flags["contact"] = flags["hand_pose"] and flags["object_pose"]
         return SequenceMeta(
@@ -233,6 +253,39 @@ class HOI4DAdapter(DatasetAdapter):
 
     def camera_poses(self, meta: SequenceMeta) -> dict[int, np.ndarray]:
         return _load_cam_log(str(self._ann(meta) / "3Dseg" / "output.log"))
+
+    # ---- meshes ---------------------------------------------------------------------------
+    def _cad_path(self, cname: str, inst: str) -> Path | None:
+        """The rigid .obj or the articulated instance folder of one object, if downloaded."""
+        try:
+            n = f"{int(inst.lstrip('N')):03d}"
+        except ValueError:
+            return None
+        for p in (self.root / CAD_DIR / "rigid" / cname / f"{n}.obj",
+                  self.root / CAD_DIR / "articulated" / cname / n):
+            if p.exists():
+                return p
+        return None
+
+    def _assign_meshes(self, meta: SequenceMeta, objects: list[ObjectTrack]) -> None:
+        """Set ``mesh_path`` (relative to the dataset root) on each object track."""
+        cad = self._cad_path(meta.tags.get("category_name", ""), meta.tags.get("instance", ""))
+        if cad is None or not objects:
+            return
+        if cad.is_file():  # rigid: one object per sequence
+            objects[0].mesh_path = str(cad.relative_to(self.root))
+            return
+        key = tuple((o.label, tuple(float(x) for x in np.round(o.dimensions, 3))) for o in objects)
+        for i, part in _match_parts(str(cad), key):
+            if part is not None:
+                objects[i].mesh_path = str((cad / "objs" / f"{part}-align.obj").relative_to(self.root))
+
+    def load_meshes(self, meta: SequenceMeta, ann: Annotations) -> dict[str, ObjectMesh] | None:
+        from egograph.data.mesh import load_mesh
+
+        out = {o.object_id: load_mesh(self.root / o.mesh_path, self.name, o.mesh_path)
+               for o in ann.objects if o.mesh_path}
+        return out or None
 
     # ---- dense modalities ----------------------------------------------------------------
     def load_depth(self, meta: SequenceMeta, frame_indices) -> np.ndarray | None:
@@ -325,6 +378,7 @@ class HOI4DAdapter(DatasetAdapter):
                     o.bbox_2d[t] = [min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)]
                 o.valid[t] = True
         ann.objects = list(tracks.values())
+        self._assign_meshes(meta, ann.objects)
         ann.actions = overlapping(self.actions(meta), ann.timestamps)
         return ann
 
@@ -360,6 +414,45 @@ def _load_actions(path: str) -> list[ActionSegment]:
 def _load_cam_log(path: str) -> dict[int, np.ndarray]:
     p = Path(path)
     return parse_open3d_log(p) if p.exists() else {}
+
+
+@lru_cache(maxsize=1024)
+def _match_parts(cad_dir: str, objects: tuple) -> list[tuple[int, str | None]]:
+    """Pair annotated parts ``objects`` = ((label, dims), ...) with the CAD parts of an articulated
+    instance folder. Cost = L1 gap (m) between box dims and the part mesh's extents, plus 1 when
+    the label has known part words (PART_WORDS) and the part name has none of them. Solved as an
+    assignment, so two annotated parts never share a mesh. Returns (object index, obj stem)."""
+    from scipy.optimize import linear_sum_assignment
+
+    from egograph.data.mesh import load_mesh
+
+    d = Path(cad_dir)
+    root = d.parents[3]  # <HOI4D>/HOI4D_CAD_Model_for_release/articulated/<Category>/<NNN>
+    parts: list[tuple[str, str]] = []  # (part name, obj stem)
+
+    def walk(n):
+        for obj in n.get("objs", []):
+            parts.append((n.get("name", ""), obj))
+        for c in n.get("children", []):
+            walk(c)
+    for n in json.loads((d / "result.json").read_text()):
+        walk(n)
+    parts = [(name, obj) for name, obj in parts if (d / "objs" / f"{obj}-align.obj").exists()]
+    if not parts:
+        return [(i, None) for i in range(len(objects))]
+    paths = [d / "objs" / f"{obj}-align.obj" for _, obj in parts]
+    ext = [np.ptp(load_mesh(p, "hoi4d", str(p.relative_to(root))).vertices, 0) for p in paths]
+    cost = np.zeros((len(objects), len(parts)))
+    for i, (label, dims) in enumerate(objects):
+        words = PART_WORDS.get(str(label).lower())
+        for j, (name, _) in enumerate(parts):
+            if np.isfinite(dims).all():
+                cost[i, j] = np.abs(np.asarray(dims) - ext[j]).sum()
+            if words and not any(w in name.lower() for w in words):
+                cost[i, j] += 1.0
+    rows, cols = linear_sum_assignment(cost)
+    got = dict(zip(rows.tolist(), cols.tolist()))
+    return [(i, parts[got[i]][1] if i in got else None) for i in range(len(objects))]
 
 
 @lru_cache(maxsize=8)

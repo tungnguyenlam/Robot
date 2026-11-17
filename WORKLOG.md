@@ -128,3 +128,19 @@
   complete) where scene cloud vs depth is 14 cm off; to investigate.
 - HOI4D CAD meshes: rigid meshes are centred at the object origin with extents = box (l,w,h) in metres;
   articulated parts use objs/new-k-align.obj per part. Loader + viewer integration not started.
+
+## 2026-11-17 - HOI4D CAD meshes in loader, tensors and viewer; scene misregistration found
+- New `mesh` modality (HOI4D, 2967/2973 seqs): `Clip.meshes` {object_id: ObjectMesh}, saved as
+  `meshes/<oid>.npz`; tensors `object_points (O,P,6)` + `object_points_valid`, config `mesh_points: 1024`.
+  `egograph/data/mesh.py` parses each .obj once into a cache (~3k-face draw mesh + 8192 surface
+  samples with normals); `egograph prepare --dataset hoi4d` built all 1140 (217 MB).
+- Rigid: `rigid/<Cat>/<NNN>.obj`, already in the objpose frame (extents = box dims to mm).
+  Articulated: `-align` part meshes paired to part labels by assignment on box-size gap + name
+  keywords; median gap 0.3–2 cm per part type (lockers/trash cans 3–5 cm: loose boxes).
+- Checks: rigid silhouette vs mask IoU median 0.65–0.8, identity orientation beats 180° flips;
+  figures in `results/mesh_check/`. Viewer: layer "object mesh (CAD)" + `/api/mesh/{ds}` (path-guarded).
+- `test_hoi4d_depth_seg_scene` failure explained: ~1 in 5 HOI4D sequences has a constant 10–60 cm
+  scene/pose misregistration in the source data (not scale, not a frame offset). Test now
+  requires 4 of 6 sequences to agree; documented in docs/MODALITIES.md.
+- Fixed temp-file races in the mesh and EPIC IMU caches (parallel writers). Ego4D FHO
+  checksum verify: 588/588 ok. Tests: 24 pass.

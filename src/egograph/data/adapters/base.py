@@ -17,6 +17,7 @@ sequence lacks the modality, so a dataset overrides only what it has:
 * ``load_imu(meta)`` -> ImuTrack for the whole sequence (the loader cuts the window)
 * ``load_gaze(meta, fi)`` -> (T, 2) pixels
 * ``load_scene(meta)`` -> ScenePoints
+* ``load_meshes(meta, ann)`` -> {object_id: ObjectMesh}, for objects whose ``mesh_path`` is set
 
 To add a dataset, subclass ``DatasetAdapter``, decorate it with ``@register``, and import
 it in ``egograph/data/adapters/__init__.py``.
@@ -31,7 +32,7 @@ from typing import Any, ClassVar
 
 import numpy as np
 
-from egograph.data.schema import ActionSegment, Annotations, ImuTrack, ScenePoints, SequenceMeta
+from egograph.data.schema import ActionSegment, Annotations, ImuTrack, ObjectMesh, ScenePoints, SequenceMeta
 from egograph.paths import data_root
 
 ADAPTERS: dict[str, type["DatasetAdapter"]] = {}
@@ -98,6 +99,9 @@ class DatasetAdapter(ABC):
         return None
 
     def load_scene(self, meta: SequenceMeta) -> ScenePoints | None:
+        return None
+
+    def load_meshes(self, meta: SequenceMeta, ann: Annotations) -> dict[str, ObjectMesh] | None:
         return None
 
     def load_annotations(self, meta: SequenceMeta, frame_indices: np.ndarray | list[int]) -> Annotations:

@@ -5,10 +5,11 @@ data:
   fps: 15               # resample every source to this rate (HOI4D is natively 15 fps)
   # On-request modalities (docs/MODALITIES.md). Labels (hands, objects, camera, actions) always
   # load. A source that lacks a requested modality yields zeros with its *_valid flag False.
-  #   rgb depth seg audio imu gaze scene contact
+  #   rgb depth seg audio imu gaze scene mesh contact
   modalities: [rgb]
   audio: {sample_rate: 16000, mono: true}   # length fixed to clip_len / fps seconds
   scene_points: 8192    # points sampled from the HOI4D scene cloud per clip
+  mesh_points: 1024     # surface samples per object mesh (HOI4D CAD), object frame
   contact_threshold: 0.01  # m, hand-joint to object-box distance counted as contact
   max_objects: 4        # objects per clip are padded to this count
   transforms:

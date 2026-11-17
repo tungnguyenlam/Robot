@@ -141,6 +141,8 @@ class EgoLoader:
             ann.gaze_2d = ad.load_gaze(meta, fi)
         if "scene" in want and "scene" in has:
             clip.scene = ad.load_scene(meta)
+        if "mesh" in want and "mesh" in has:
+            clip.meshes = ad.load_meshes(meta, ann)
         return self.transform(clip) if self.transform else clip
 
     def load_window(self, w: ClipWindow, with_frames: bool | None = None) -> Clip:

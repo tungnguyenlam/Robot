@@ -40,6 +40,8 @@ MODALITIES: dict[str, Modality] = {m.name: m for m in [
              "2D eye-gaze point in pixels"),
     Modality("scene", "sequence", True, "scene_points (N,6) xyz+rgb, scene_valid",
              "static point cloud of the scene in the world frame"),
+    Modality("mesh", "sequence", True, "object_points (O,P,6) xyz+normal in the object frame, object_points_valid (O,)",
+             "object (part) meshes in the frame of T_cam_obj: simplified mesh + surface samples"),
     Modality("contact", "frame", True, "contact (2,O,T) bool, contact_dist (2,O,T) metres",
              "hand-object proximity derived from 3D joints and object boxes"),
     Modality("hand_pose", "label", False, "hand_valid, hand_joints_2d/3d, hand_mano",

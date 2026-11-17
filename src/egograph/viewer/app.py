@@ -1,7 +1,7 @@
 """Dataset viewer: a FastAPI backend over the same adapters and loader used for training.
 
 Every overlay in the browser (hand keypoints, projected MANO joints, 3D object boxes,
-camera trajectory) is computed by ``EgoLoader`` and ``egograph.data.geometry``. Looking at
+camera trajectory, object meshes) is computed by ``EgoLoader`` and ``egograph.data.geometry``. Looking at
 the viewer therefore also checks the data pipeline.
 
 Run on amdserver, where the data lives:   egograph viewer --host 0.0.0.0 --port 8765
@@ -162,14 +162,35 @@ def create_app() -> FastAPI:
                 for t in np.flatnonzero(o.valid):
                     corners[t] = project(transform_points(o.T_cam_obj[t], c), K)
                     axes[t] = project(transform_points(o.T_cam_obj[t], ax), K)
+            pose = np.where(o.valid[:, None, None], o.T_cam_obj, np.nan) if o.mesh_path else None
             objects.append({"object_id": o.object_id, "label": o.label, "valid": o.valid,
                             "bbox_2d": o.bbox_2d, "corners_2d": corners, "axes_2d": axes,
-                            "dimensions": o.dimensions,
+                            "dimensions": o.dimensions, "mesh_path": o.mesh_path,
+                            "T_cam_obj": pose[:, :3] if pose is not None else None,
                             "depth": [float(o.T_cam_obj[t, 2, 3]) if o.valid[t] else None
                                       for t in range(len(fi))]})
         frames = {"start": start, "end": end, "hands": hands, "objects": objects,
                   "gaze_2d": ann.gaze_2d if ann.gaze_2d is not None and np.isfinite(ann.gaze_2d).any() else None}
         return _clean(frames)
+
+    @lru_cache(maxsize=256)
+    def _mesh(dataset: str, rel: str) -> dict[str, Any]:
+        from egograph.data.mesh import load_mesh
+
+        root = st.loader.adapter(dataset).root.resolve()
+        p = (root / rel).resolve()
+        if p.suffix != ".obj" or not p.is_relative_to(root) or not p.is_file():
+            raise HTTPException(404, f"no mesh {rel}")
+        m = load_mesh(p, dataset, rel)
+        return {"path": rel, "vertices": np.round(m.vertices, 4).ravel().tolist(),
+                "faces": m.faces.ravel().tolist()}
+
+    @app.get("/api/mesh/{dataset}")
+    def mesh(dataset: str, path: str) -> Any:
+        """Simplified mesh (object frame) of an object's ``mesh_path``, for the overlay."""
+        if dataset not in ADAPTERS:
+            raise HTTPException(404, f"unknown dataset {dataset}")
+        return JSONResponse(_mesh(dataset, path))
 
     @app.get("/api/sequence/{dataset}/{sid}/annotations")
     def annotations(dataset: str, sid: str, start: int = 0, end: int | None = None) -> Any:

@@ -45,16 +45,16 @@ Run `egograph modalities` for live counts. As of 2026-11-16:
 | `imu` | – | 142 (GoPro, camera frame) | 67 (device frame) |
 | `gaze` | – | – | 1 |
 | `scene` | 2973 | – | – |
+| `mesh` | 2967 (CAD; every rigid object, all articulated parts) | – | – |
 | `intrinsics`, `camera_pose`, `object_pose` | all | – | – |
 | `hand_pose` | 1685 | – | – |
 | `hand_box`, `object_box` | object_box: all | – (hand-object detections not downloaded) | 33 (FHO key frames) |
 | `contact` (derived) | 1685 | – | – |
 | `actions` | all | all | 254 (narrations and/or FHO) |
 
-HOI4D CAD models (object meshes) are downloaded to `data/HOI4D/HOI4D_CAD_Model_for_release/`
-(`rigid/<Category>/<id>.obj`, `articulated/<Category>/<id>/{objs,mobility_v2.json,...}`) but the
-loader does not read them yet. Still missing: EPIC VISOR masks and hand-object detections, and
-Ego4D `fho_hands` for train/val (not in v2).
+HOI4D CAD models are in `data/HOI4D/HOI4D_CAD_Model_for_release/` and load as the `mesh`
+modality (section 3). Still missing: EPIC VISOR masks and hand-object detections, and Ego4D
+`fho_hands` for train/val (not in v2).
 
 ### Which modalities the project needs
 
@@ -90,7 +90,34 @@ with the sequence's object list.
 
 **HOI4D scene cloud (`scene`).** `3Dseg/label.pcd` (~150k points, xyz rgb label). It is in
 the same world frame as `T_world_cam` (from `3Dseg/output.log`). Check: projected into a view,
-its points agree with the depth map (median gap 1–3.5 cm over 4 sequences × 3 frames).
+its points agree with the depth map: median gap 0.4–4 cm in 20 of 25 random sequences. The
+other ~1 in 5 (e.g. `ZY20210800001-H1-C1-N19-S100-s02-T1`, two Lamp sequences) have a constant
+10–60 cm misregistration in the source data. No other frame's pose fixes it and it is not a
+scale error, so treat the scene cloud as approximate for those; per-frame depth is unaffected.
+
+**HOI4D object meshes (`mesh`).** Rigid objects: `rigid/<Category>/<NNN>.obj`, where NNN is the
+instance number in the sequence id (`N12` → `012`). Articulated objects: one
+`articulated/<Category>/<NNN>/objs/new-<k>-align.obj` per part, named in `result.json`. All
+meshes are in metres in the frame of `T_cam_obj`, centred on the annotated box. Rigid mesh
+extents match the box `dimensions` to a few mm. Articulated parts are paired with annotated
+part labels (`Laptopdisplay`, `Safedoor`, …) by `_match_parts` in the HOI4D adapter: an
+assignment on box-size gap plus a name-keyword check (`PART_WORDS`). Over all ~1600 articulated
+sequences, the median gap between box and part extents is 0.3–2 cm per part type. Lockers and
+trash cans run 3–5 cm because their part boxes are loose, but each has one mesh per part, so
+the pairing is unambiguous. Checks:
+- Rigid silhouettes vs masks: IoU median 0.65–0.8 (Knife 0.4, thin).
+- The identity orientation beats 180° flips; mugs and kettles show the handle on the correct side
+  (`results/mesh_check/hoi4d_mesh_orientation.jpg`).
+- Part overlays land on the correct parts (`results/mesh_check/hoi4d_articulated_parts.jpg`).
+- Missing: 6 sequences (5 Lamp, 1 Pliers) whose instance has no CAD folder, and 10 Pliers parts
+  with no `-align` file.
+
+Each `.obj` (50k–100k triangles) is parsed once into
+`$EGO_INDEX_ROOT/cache/hoi4d/meshes/*.npz` (`egograph/data/mesh.py`):
+- a ~3k-face simplified mesh for drawing;
+- 8192 area-weighted surface points with normals from the full mesh, for penetration and contact
+  losses.
+Run `egograph prepare --dataset hoi4d` once to build them all (~1.5 GB of CAD → small npz files).
 
 **EPIC audio.** Stereo AAC at 48 kHz in the video file. `read_audio` resamples it (default
 16 kHz mono) and aligns it to the first decoded video frame. A clip of frames
@@ -137,6 +164,7 @@ clip = L.load_clip("hoi4d", seq_id, frame_indices)
 clip.depth          # (T,H,W) metres      clip.seg   (T,H,W) uint8 ids
 clip.audio          # (S,C) float32       clip.audio_sr
 clip.scene          # ScenePoints(xyz, rgb, label)
+clip.meshes         # {object_id: ObjectMesh(vertices, faces, points, normals, source)} ("mesh")
 clip.annotations.imu      # ImuTrack(t, accel, gyro, frame); .at(timestamps) -> (T,6), valid
 clip.annotations.gaze_2d  # (T,2) pixels, NaN when missing
 clip.annotations.hands["right"].bbox_2d  # (T,4) xyxy (Ego4D FHO)
@@ -162,6 +190,7 @@ keys, always with the same shape so mixed-dataset batches collate:
 | `imu_in_camera_frame`, `gravity_cam` | (B,), (B,3) | unit gravity (down) in the camera frame; zero unless the IMU is in the camera frame |
 | `gaze_2d`, `gaze_valid` | (B,T,2), (B,T) | |
 | `scene_points`, `scene_valid` | (B,N,6), (B,) | xyz (world) + rgb/255, N = `scene_points` |
+| `object_points`, `object_points_valid` | (B,O,P,6), (B,O) | surface xyz + normal in each object's frame (map with `obj_T_cam_obj`), P = `mesh_points` (1024) |
 | `contact`, `contact_dist`, `contact_valid` | (B,2,O,T) | hand × object × time |
 
 Missing values are 0 in tensors. Always mask with the `*_valid` flags.
@@ -176,5 +205,6 @@ egograph export --dataset hoi4d --modalities rgb depth seg scene --limit 1 --out
 
 `scripts/viewer.sh start` (http://100.121.118.8:8765). There is an Ego4D tab now. Per
 sequence it shows modality badges, dashed modality filter chips in the sidebar, hand boxes
-(Ego4D FHO), a gaze ring, an IMU plot with a playhead, and depth or mask overlays when
-paused (layer buttons "depth (paused)" / "masks (paused)").
+(Ego4D FHO), a gaze ring, an IMU plot with a playhead, depth or mask overlays when paused
+(layer buttons "depth (paused)" / "masks (paused)"), and for HOI4D the CAD mesh of each object
+or part, posed by `T_cam_obj` and shaded (layer "object mesh (CAD)", from `/api/mesh/hoi4d`).

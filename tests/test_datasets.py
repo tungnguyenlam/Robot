@@ -97,16 +97,25 @@ def test_hoi4d_depth_seg_scene():
     # Depth at the 2D keypoints matches the 3D joint depth (pixel-aligned, metres).
     assert abs(np.median(z[z > 0]) - np.median(h.joints_3d[0][:, 2])) < 0.08
     assert (c.seg[0][uv[:, 1], uv[:, 0]] > 0).mean() > 0.5   # keypoints fall on a mask
-    # The scene cloud lives in the T_world_cam frame: projected into this view, it agrees with depth.
-    Tcw = np.linalg.inv(c.annotations.T_world_cam[0])
-    p = c.scene.xyz @ Tcw[:3, :3].T + Tcw[:3, 3]
-    p = p[p[:, 2] > 0.1]
-    u = (m.K[0, 0] * p[:, 0] / p[:, 2] + m.K[0, 2]).astype(int)
-    v = (m.K[1, 1] * p[:, 1] / p[:, 2] + m.K[1, 2]).astype(int)
-    ok = (u >= 0) & (u < m.width) & (v >= 0) & (v < m.height)
-    D = c.depth[0][v[ok], u[ok]]
-    good = D > 0
-    assert np.median(np.abs(D[good] - p[ok][good, 2])) < 0.05
+
+    # The scene cloud lives in the T_world_cam frame: projected into a view, it agrees with depth.
+    # About 1 in 5 HOI4D sequences has a scene/pose registration error of 10-60 cm in the source
+    # data (docs/MODALITIES.md), so require most of a few sequences, not every one, to agree.
+    def gap(m):
+        c = L.load_clip("hoi4d", m.sequence_id, [150], with_frames=False)
+        Tcw = np.linalg.inv(c.annotations.T_world_cam[0])
+        p = c.scene.xyz @ Tcw[:3, :3].T + Tcw[:3, 3]
+        p = p[p[:, 2] > 0.1]
+        u = (m.K[0, 0] * p[:, 0] / p[:, 2] + m.K[0, 2]).astype(int)
+        v = (m.K[1, 1] * p[:, 1] / p[:, 2] + m.K[1, 2]).astype(int)
+        ok = (u >= 0) & (u < m.width) & (v >= 0) & (v < m.height)
+        D = c.depth[0][v[ok], u[ok]]
+        good = D > 0
+        return np.median(np.abs(D[good] - p[ok][good, 2]))
+
+    seqs = [x for x in idx.metas if {"depth", "scene"} <= set(x.modalities)][::400][:6]
+    gaps = np.array([gap(x) for x in seqs])
+    assert (gaps < 0.05).sum() >= 4, gaps
 
 
 @require_index("epic_kitchens")

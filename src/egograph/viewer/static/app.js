@@ -36,6 +36,7 @@ const LAYERS = [
   { key: "bbox", label: "object 2D box", color: "#d6d6d6", on: true, mod: "object_box" },
   { key: "handbox", label: "hand 2D box", color: "#ffd24c", on: true, mod: "hand_box" },
   { key: "gaze", label: "gaze", color: "#ff4cf0", on: true, mod: "gaze" },
+  { key: "mesh", label: "object mesh (CAD)", color: "#7fd1ff", on: true, mod: "mesh" },
   { key: "axes", label: "object axes", color: "#ff5d5d", on: false, needs: "has_object_pose" },
   { key: "depth", label: "depth (paused)", color: "#3be0c0", on: false, mod: "depth" },
   { key: "seg", label: "masks (paused)", color: "#b04cff", on: false, mod: "seg" },
@@ -44,7 +45,7 @@ const hasMod = (m, k) => (m.modalities || []).includes(k);
 
 const S = {
   datasets: [], ds: null, q: "", require: new Set(), mods: new Set(), tags: {}, offset: 0, total: 0,
-  seq: null, frame: 0, chunks: new Map(), pending: new Set(), layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
+  seq: null, frame: 0, chunks: new Map(), pending: new Set(), meshes: new Map(), layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
 };
 
 // ─────────────────────────────── datasets ───────────────────────────────
@@ -169,7 +170,7 @@ async function openSequence(dataset, sid, startFrame = 0) {
   $("#empty").hidden = true; $("#player").hidden = false;
   $("#seq-id").textContent = m.sequence_id;
   const ALL = ["rgb", "depth", "seg", "audio", "imu", "gaze", "scene", "intrinsics", "camera_pose",
-    "hand_pose", "hand_box", "object_pose", "object_box", "contact", "actions"];
+    "hand_pose", "hand_box", "object_pose", "object_box", "mesh", "contact", "actions"];
   const mods = new Set(m.modalities?.length ? m.modalities : [
     "rgb", m.has_hand_pose && "hand_pose", m.has_object_pose && "object_pose", m.has_camera_pose && "camera_pose",
     m.has_actions && "actions", m.intrinsics && "intrinsics"].filter(Boolean));
@@ -331,6 +332,15 @@ function draw() {
   const lw = Math.max(1.5, 2 * s * dpr);
   ctx.lineCap = "round"; ctx.lineJoin = "round";
 
+  if (S.layers.mesh && m.intrinsics) {
+    // Opaque faces on an offscreen canvas, then one translucent blit (no alpha build-up).
+    const mc = S.meshCv || (S.meshCv = document.createElement("canvas"));
+    if (mc.width !== cv.width || mc.height !== cv.height) { mc.width = cv.width; mc.height = cv.height; }
+    const mctx = mc.getContext("2d"); mctx.clearRect(0, 0, mc.width, mc.height);
+    let any = false;
+    for (const o of ch.objects) if (o.valid[i] && o.mesh_path && o.T_cam_obj?.[i]?.[0]?.[0] != null) any = drawMesh(mctx, o, i, m, s) || any;
+    if (any) { ctx.globalAlpha = 0.55; ctx.drawImage(mc, 0, 0); ctx.globalAlpha = 1; }
+  }
   for (const o of ch.objects) {
     if (!o.valid[i]) continue;
     if (S.layers.box3d && o.corners_2d[i][0][0] !== null) {
@@ -366,6 +376,50 @@ function draw() {
     if (S.layers.mano && h.mano_2d && h.mano_2d[i][0][0] !== null) skeleton(ctx, h.mano_2d[i].map(P), "#f05bd8", lw * 0.7, dpr * 0.7);
   }
   drawGaze(ctx, ch, i, s, dpr);
+}
+
+// CAD mesh: transform by T_cam_obj, project with K, paint back-to-front with flat shading.
+function drawMesh(ctx, o, i, m, s) {
+  ctx.lineWidth = 0.6;
+  const key = `${m.dataset}:${o.mesh_path}`, mesh = S.meshes.get(key);
+  if (!mesh) {
+    S.meshes.set(key, "pending");
+    api(`/api/mesh/${m.dataset}?path=${encodeURIComponent(o.mesh_path)}`)
+      .then((r) => { S.meshes.set(key, { v: Float32Array.from(r.vertices), f: Uint32Array.from(r.faces) }); draw(); })
+      .catch(() => S.meshes.set(key, "missing"));
+    return false;
+  }
+  if (typeof mesh === "string") return false;
+  const T = o.T_cam_obj[i], K = m.intrinsics, n = mesh.v.length / 3;
+  const X = new Float32Array(n * 3), U = new Float32Array(n * 2);
+  for (let k = 0; k < n; k++) {
+    const a = mesh.v[3 * k], b = mesh.v[3 * k + 1], c = mesh.v[3 * k + 2];
+    const x = T[0][0] * a + T[0][1] * b + T[0][2] * c + T[0][3];
+    const y = T[1][0] * a + T[1][1] * b + T[1][2] * c + T[1][3];
+    const z = T[2][0] * a + T[2][1] * b + T[2][2] * c + T[2][3];
+    X[3 * k] = x; X[3 * k + 1] = y; X[3 * k + 2] = z;
+    U[2 * k] = (K[0][0] * x / z + K[0][2]) * s; U[2 * k + 1] = (K[1][1] * y / z + K[1][2]) * s;
+  }
+  const nf = mesh.f.length / 3, order = [], depth = new Float32Array(nf), shade = new Float32Array(nf);
+  for (let j = 0; j < nf; j++) {
+    const p = 3 * mesh.f[3 * j], q = 3 * mesh.f[3 * j + 1], r = 3 * mesh.f[3 * j + 2];
+    if (X[p + 2] < 0.02 || X[q + 2] < 0.02 || X[r + 2] < 0.02) continue;
+    const ux = X[q] - X[p], uy = X[q + 1] - X[p + 1], uz = X[q + 2] - X[p + 2];
+    const vx = X[r] - X[p], vy = X[r + 1] - X[p + 1], vz = X[r + 2] - X[p + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const cx = (X[p] + X[q] + X[r]) / 3, cy = (X[p + 1] + X[q + 1] + X[r + 1]) / 3, cz = (X[p + 2] + X[q + 2] + X[r + 2]) / 3;
+    const nn = Math.hypot(nx, ny, nz) * Math.hypot(cx, cy, cz) || 1;
+    depth[j] = cz; shade[j] = Math.abs(nx * cx + ny * cy + nz * cz) / nn; order.push(j);
+  }
+  order.sort((a, b) => depth[b] - depth[a]);
+  const h = hue(o.label);
+  for (const j of order) {
+    const p = 2 * mesh.f[3 * j], q = 2 * mesh.f[3 * j + 1], r = 2 * mesh.f[3 * j + 2];
+    ctx.fillStyle = ctx.strokeStyle = `hsl(${h} 70% ${Math.round(25 + 50 * shade[j])}%)`;
+    ctx.beginPath(); ctx.moveTo(U[p], U[p + 1]); ctx.lineTo(U[q], U[q + 1]); ctx.lineTo(U[r], U[r + 1]); ctx.closePath();
+    ctx.fill(); ctx.stroke();  // stroke hides anti-aliasing seams between faces
+  }
+  return order.length > 0;
 }
 
 function drawGaze(ctx, ch, i, s, dpr) {
