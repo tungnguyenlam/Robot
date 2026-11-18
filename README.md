@@ -37,7 +37,8 @@ For training, use `egograph.data.torch_dataset.EgoClipDataset.from_config(cfg["d
 
 ## Docs
 
-- [Data format (egoformat-v1)](docs/DATA_FORMAT.md): schema, conventions, on-disk layout, tensor layout
+- [Data format (egoformat-v1.1)](docs/DATA_FORMAT.md): schema, conventions, on-disk layout, tensor layout
+- [Modalities](docs/MODALITIES.md): which dataset has which modality, how each was checked, tensor keys
 - [Architecture](docs/ARCHITECTURE.md): module map and where Months 2–6 plug in
 - [Experiments](docs/EXPERIMENTS.md): configs, run directories, logging
 - [Dataset acquisition](docs/DATASETS_GUIDE.md)

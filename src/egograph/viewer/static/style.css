@@ -95,6 +95,18 @@ kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line)
 .stage video, .stage canvas, .stage .mod-img { position: absolute; inset: 0; width: 100%; height: 100%; }
 .stage .mod-img { opacity: .55; image-rendering: pixelated; pointer-events: none; }
 .stage canvas { z-index: 2; }
+/* split view: depth / masks in their own pane, full opacity */
+.stage-wrap.split { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
+.stage-wrap.split .stage { max-height: none; width: 100%; }
+.stage.side { background: #000; }
+.stage.side .mod-img { opacity: 1; object-fit: contain; }
+.side-note { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 12px; }
+.side-note:empty, .side-legend:empty { display: none; }
+.side-legend { position: absolute; left: 10px; right: 10px; bottom: 8px; display: flex; align-items: center; gap: 8px; padding: 3px 8px; border-radius: 6px; background: rgba(10,12,15,.72); }
+.side-legend .bar { flex: 1; height: 8px; border-radius: 3px;
+  background: linear-gradient(90deg, #30123b, #4662d7, #36aaf9, #1ae4b6, #72fe5e, #c8ef34, #faba39, #f66b19, #ca2a04, #7a0403); }
+.split-btn { font-size: 11.5px; padding: 3px 9px; }
+.split-btn.on { border-color: #3be0c0; color: #3be0c0; }
 .chip.mod { border-style: dashed; }
 .action-now { position: absolute; left: 12px; top: 10px; padding: 3px 10px; border-radius: 6px; background: rgba(10,12,15,.72); font-weight: 600; font-size: 13px; backdrop-filter: blur(4px); }
 .action-now:empty { display: none; }

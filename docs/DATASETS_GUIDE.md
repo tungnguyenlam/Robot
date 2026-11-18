@@ -135,6 +135,21 @@ python epic_downloader.py --rgb-frames --train --specific-videos P01_01 --output
 python epic_downloader.py --masks --participants P01 --output-path ~/datasets/epic
 ```
 
+#### Step 3: VISOR segmentations (manual masks + hand contact)
+VISOR is a separate deposit: <https://data.bris.ac.uk/data/dataset/2v6cgv1x04ol22qp9rm9x2j6a7>
+(CC BY-NC 4.0; 19.6 GB in all, 11.3 GB without the RGB frame zips). Files are plain HTTPS
+under `https://data.bris.ac.uk/datasets/2v6cgv1x04ol22qp9rm9x2j6a7/<path>`, with no login.
+We fetched only what matches our P01–P05 videos (2026-11-19, 127 files, 4.1 GB, on amdserver
+in `data/epic_kitchens/VISOR/`):
+- `GroundTruth-SparseAnnotations/annotations/{train,val}/<vid>.json` for 62 videos;
+- `Interpolations-DenseAnnotations/{train,val}/<vid>_interpolations.zip` for the same 62;
+- `frame_mapping.json`, `EPIC_100_noun_classes_v2.csv`, `README.txt`.
+
+`MANIFEST.txt` in that folder lists each path and byte size. To refetch or resume, run
+`curl -C - -o <path> <base>/<path>` for every line and compare sizes; finished zips should pass
+`unzip -tq`. We skipped the sparse `rgb_frames` zips because we decode frames from the videos.
+What the files contain and how they map to our frames: [MODALITIES.md](MODALITIES.md) section 3.
+
 ---
 
 ## 3. HOI4D

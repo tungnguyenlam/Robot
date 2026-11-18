@@ -188,10 +188,10 @@ async function openSequence(dataset, sid, startFrame = 0) {
     "rgb", m.has_hand_pose && "hand_pose", m.has_object_pose && "object_pose", m.has_camera_pose && "camera_pose",
     m.has_actions && "actions", m.intrinsics && "intrinsics"].filter(Boolean));
   $("#seq-badges").replaceChildren(...ALL.map((k) => el("span", { class: `badge ${mods.has(k) ? "yes" : ""}` }, `${mods.has(k) ? "✓" : "✗"} ${k.replace("_", " ")}`)));
-  S.overlayKey = null; $("#mod-img").hidden = true;
+  S.overlayKey = S.sideKey = null; $("#mod-img").hidden = true; $("#side-img").hidden = true;
   renderImu();
   updateLayers(m);
-  $("#stage").style.aspectRatio = `${m.width} / ${m.height}`;
+  $("#stage").style.aspectRatio = $("#side").style.aspectRatio = `${m.width} / ${m.height}`;
   const v = $("#video");
   v.src = seq.video_url;
   if (startFrame) v.addEventListener("loadedmetadata", () => seekFrame(startFrame), { once: true });
@@ -570,20 +570,48 @@ function drawGaze(ctx, ch, i, s, dpr) {
   ctx.beginPath(); ctx.arc(g[0] * s, g[1] * s, 3 * dpr, 0, 7); ctx.fillStyle = "#ff4cf0"; ctx.fill();
 }
 
-// Depth / mask overlay: one PNG per frame from the server, only while paused (decoding a
-// 1080p 16-bit depth frame per video frame would not keep up with playback).
+// Depth / mask images: one PNG per frame from the server, only while paused (decoding a
+// 1080p 16-bit depth frame per video frame would not keep up with playback). Normally drawn
+// over the video; in split view the side pane shows depth (or masks) at full opacity, and if
+// both layers are on, masks stay on the video.
 function updateModImage(f) {
-  const img = $("#mod-img"), m = S.seq.meta, v = $("#video");
-  const kind = S.layers.seg && hasMod(m, "seg") ? "seg" : S.layers.depth && hasMod(m, "depth") ? "depth" : null;
-  if (!kind || !v.paused) { img.hidden = true; S.overlayKey = null; return; }
+  const m = S.seq.meta, paused = $("#video").paused;
+  const want = (k) => S.layers[k] && hasMod(m, k);
+  let over = want("seg") ? "seg" : want("depth") ? "depth" : null, side = null;
+  if (S.split) { side = want("depth") ? "depth" : over; if (over === side) over = null; }
+  loadModImage($("#mod-img"), "overlay", over, f, paused);
+  loadModImage($("#side-img"), "side", side, f, paused);
+  if (!S.split) return;
+  const avail = ["depth", "seg"].filter((k) => hasMod(m, k));
+  $("#side-note").textContent = !avail.length ? "No depth or masks in this sequence"
+    : !side ? `Turn on the ${avail.map((k) => (k === "depth" ? "“depth (paused)”" : "“masks (paused)”")).join(" or ")} layer`
+    : !paused ? `Pause to show ${side === "depth" ? "depth" : "masks"}` : "";
+  const leg = $("#side-legend");
+  if (side === "depth" && paused) { if (!leg.firstChild) leg.replaceChildren("0.2 m", el("span", { class: "bar" }), "2.0 m"); }
+  else leg.replaceChildren();
+}
+function loadModImage(img, slot, kind, f, paused) {
+  const k = `${slot}Key`, t = `${slot}Timer`, m = S.seq.meta;
+  if (!kind || !paused) { img.hidden = true; S[k] = null; return; }
   const key = `${m.sequence_id}:${kind}:${f}`;
-  if (S.overlayKey === key) return;
-  S.overlayKey = key;
-  clearTimeout(S.overlayTimer);
-  S.overlayTimer = setTimeout(() => {
-    img.onload = () => { if (S.overlayKey === key) img.hidden = false; };
-    img.src = `/api/modality/${m.dataset}/${encodeURIComponent(m.sequence_id)}/${kind}/${f}.png?w=960`;
+  if (S[k] === key) return;
+  S[k] = key;
+  clearTimeout(S[t]);
+  S[t] = setTimeout(() => {
+    img.onload = () => { if (S[k] === key) img.hidden = false; };
+    img.src = `/api/modality/${m.dataset}/${encodeURIComponent(m.sequence_id)}/${kind}/${f}.png?w=${slot === "side" ? 1280 : 960}`;
   }, 120);
+}
+function setSplit(on) {
+  S.split = on;
+  $("#side").hidden = !on;
+  $(".stage-wrap").classList.toggle("split", on);
+  $("#split").classList.toggle("on", on);
+  // Turning split on with no depth/mask layer active: switch depth on so the pane isn't empty.
+  if (on && S.seq && !S.layers.depth && !S.layers.seg && hasMod(S.seq.meta, "depth")) {
+    S.layers.depth = true; document.querySelector('#layers [data-key="depth"]')?.classList.remove("off");
+  }
+  draw();
 }
 
 // IMU panel: accelerometer (top) and gyroscope (bottom), bin-averaged over the sequence.
@@ -662,9 +690,10 @@ function bindPlayer() {
       const t = v.currentTime, acts = S.seq.actions;
       const a = e.key === "]" ? acts.find((x) => x.start_s > t + 0.01) : [...acts].reverse().find((x) => x.start_s < t - 0.3);
       if (a) seekTime(a.start_s + 0.001);
-    }
+    } else if (e.key === "v" && !e.ctrlKey && !e.metaKey) setSplit(!S.split);
   });
   $("#clip-run").onclick = runClip;
+  $("#split").onclick = () => setSplit(!S.split);
 }
 function seekFrame(f) {
   const m = S.seq.meta; f = Math.max(0, Math.min(m.num_frames - 1, f));

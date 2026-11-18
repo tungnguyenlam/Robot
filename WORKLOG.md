@@ -157,3 +157,25 @@
   frames (98% exact); only 12k "no state change" negatives are new. sta/lta/goalstep/nlq/vq/av skipped.
 - Tests: 27 pass (+keyframe mapping, Ego4D keyframes, viewer hand mesh/contact/scene endpoints).
   Screenshots: results/viewer_check/. Viewer restarted on :8765.
+
+## 2026-11-18 - viewer: split view for depth / masks
+- New "⧉ split view" button (key `v`) puts the paused depth or mask PNG in its own pane next to
+  the video at full opacity, with a 0.2-2.0 m turbo colour bar for depth. With depth and masks
+  both on, depth goes to the pane and masks stay overlaid on the video. Turning split on with
+  neither layer active switches depth on. Still paused-only, same `/api/modality` endpoint (w=1280).
+- Files: `src/egograph/viewer/static/{index.html,app.js,style.css}`. Checked in headless
+  Chromium on HOI4D ZY20210800001-H1-C1-N19-S100-s02-T1 frame 120.
+
+## 2026-11-19 - EPIC VISOR annotations downloaded; docs refreshed
+- VISOR (data.bris `2v6cgv1x04ol22qp9rm9x2j6a7`) restricted to our P01–P05 videos: sparse GT JSON +
+  dense interpolation zips for 62 of our 156 EPIC videos, plus `frame_mapping.json`, noun classes v2,
+  README. 127 files, 4.1 GB, in `data/epic_kitchens/VISOR/` (`MANIFEST.txt` = path + bytes).
+  6 more of ours are in VISOR test (no annotations); 88 are not in VISOR. RGB frame zips skipped.
+- Check: all 127 sizes match, 62/62 zips pass `unzip -t`, 62 JSONs parse. Content: 15,948 frames,
+  82,291 polygon masks; hand masks carry `in_contact_object` (20,925 name the touched mask), i.e.
+  real EPIC contact labels.
+- Not loaded yet: the EPIC adapter needs `seg` (polygons → masks) and contact, mapped through
+  `frame_mapping.json` and checked against our decoded frames.
+- Docs: MODALITIES.md (coverage rows, VISOR source section, viewer split view), DATASETS_GUIDE.md
+  (VISOR step), ARCHITECTURE.md (mesh.py, FHO key frames, ego4d_select_fho.py), README.md
+  (egoformat-v1.1, Modalities link).

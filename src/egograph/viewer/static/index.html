@@ -10,7 +10,7 @@
   <header class="topbar">
     <div class="brand"><span class="logo">◎</span> egograph <span class="dim">/ dataset viewer</span></div>
     <nav id="dataset-tabs" class="tabs"></nav>
-    <div class="kbd-hint"><kbd>space</kbd> play <kbd>←</kbd><kbd>→</kbd> frame <kbd>⇧←</kbd><kbd>⇧→</kbd> 1 s <kbd>[</kbd><kbd>]</kbd> action</div>
+    <div class="kbd-hint"><kbd>space</kbd> play <kbd>←</kbd><kbd>→</kbd> frame <kbd>⇧←</kbd><kbd>⇧→</kbd> 1 s <kbd>[</kbd><kbd>]</kbd> action <kbd>v</kbd> split</div>
   </header>
 
   <main class="layout">
@@ -46,6 +46,11 @@
             <canvas id="overlay"></canvas>
             <div id="action-now" class="action-now"></div>
           </div>
+          <div id="side" class="stage side" hidden>
+            <img id="side-img" class="mod-img" alt="" hidden />
+            <div id="side-note" class="side-note dim small"></div>
+            <div id="side-legend" class="side-legend small mono"></div>
+          </div>
         </div>
 
         <div class="controls">
@@ -56,6 +61,7 @@
             <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
             <option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option>
           </select>
+          <button id="split" class="split-btn" title="Show depth / masks in a separate pane next to the video (v)">⧉ split view</button>
           <div class="readout mono"><span id="frame-no">0</span> / <span id="frame-total">0</span> · <span id="time-no">0.00</span>s</div>
           <div class="spacer"></div>
           <span id="overlay-note" class="dim small"></span>

@@ -40,7 +40,7 @@ Run `egograph modalities` for live counts. As of 2026-11-18:
 |---|---|---|---|
 | `rgb` | all | all | all |
 | `depth` | 2973 | – | – |
-| `seg` | 2972 | – (VISOR not downloaded) | – |
+| `seg` | 2972 | – (VISOR downloaded for 62 videos, not loaded yet) | – |
 | `audio` | – (silent videos) | 156 | 541 |
 | `imu` | – | 142 (GoPro, camera frame) | 67 (device frame) |
 | `gaze` | – | – | 1 |
@@ -49,13 +49,14 @@ Run `egograph modalities` for live counts. As of 2026-11-18:
 | `intrinsics`, `camera_pose`, `object_pose` | all | – | – |
 | `hand_pose` | 1685 | – | – |
 | `hand_box`, `object_box` | object_box: all | – (hand-object detections not downloaded) | 586 (FHO key frames) |
-| `contact` (derived) | 1685 | – | – |
+| `contact` (derived) | 1685 | – (VISOR hand contact downloaded, not loaded yet) | – |
 | `keyframes` (contact onset, PNR) | – | – | 587 (FHO labels) |
 | `actions` | all | all | 807 (narrations and/or FHO) |
 
 HOI4D CAD models are in `data/HOI4D/HOI4D_CAD_Model_for_release/` and load as the `mesh`
-modality (section 3). Still missing: EPIC VISOR masks and hand-object detections, and Ego4D
-`fho_hands` for train/val (not in v2).
+modality (section 3). EPIC VISOR masks and hand contact (62 of our 156 videos) are downloaded
+to `data/epic_kitchens/VISOR/` but the EPIC adapter does not read them yet (section 3). Still
+missing: EPIC hand-object detections, and Ego4D `fho_hands` for train/val (not in v2).
 
 ### Which modalities the project needs
 
@@ -132,6 +133,26 @@ with a ~30° head tilt. That is only consistent with the camera frame. The first
 file (seconds per video), so run `egograph prepare --dataset epic_kitchens` once to cache all
 of them under `$EGO_INDEX_ROOT/cache/epic_kitchens/imu/`.
 
+**EPIC VISOR (downloaded 2026-11-19, not loaded yet).** Manual polygon masks from
+[VISOR](https://github.com/epic-kitchens/VISOR) (data.bris DOI `2v6cgv1x04ol22qp9rm9x2j6a7`,
+CC BY-NC 4.0), in `data/epic_kitchens/VISOR/` (4.1 GB). It covers 62 of our 156 EPIC
+videos (VISOR train/val). Another 6 of ours are in VISOR's test split, which has no released
+annotations; the other 88 are not in VISOR.
+- `GroundTruth-SparseAnnotations/annotations/{train,val}/<vid>.json`: about 2 frames per action,
+  15,948 frames and 82,291 masks in all. Each mask has an open-vocabulary `name`, an EPIC noun
+  `class_id` (`EPIC_100_noun_classes_v2.csv`, which adds left/right hand and glove), and
+  polygon `segments` in 1920×1080 pixels. Hand masks carry `in_contact_object`: the id of the
+  touched mask (20,925 hand masks), `hand-not-in-contact`, `none-of-the-above` or `inconclusive`.
+  These are real contact labels, unlike the derived HOI4D ones.
+- `Interpolations-DenseAnnotations/{train,val}/<vid>_interpolations.zip`: one JSON each with
+  interpolated masks between pairs of sparse frames (`type` 1 = ground-truth end frame,
+  0 = interpolated), kept only where the interpolation scored high J&F.
+- `frame_mapping.json`: VISOR frame names (`P01_01_frame_0000000140.jpg`) come from a
+  re-extraction and need this map to reach EPIC `rgb_frames` numbers. An adapter must check the
+  map against our decoded video frames before using it.
+- Not fetched: the sparse RGB frame zips (we have the videos) and the other 96 VISOR videos.
+`MANIFEST.txt` in that folder lists every file with its byte size.
+
 **Ego4D IMU.** `v2/imu/<uid>.csv` with `canonical_timestamp_ms` on the video timeline. The axes
 are the device's own frame (`ImuTrack.frame == "device"`), and its rotation to the camera is
 unknown, so `gravity_cam` is zero for these clips.
@@ -150,7 +171,8 @@ numbers count frames of the full-scale video, and boxes are xywh pixels at full 
 only on key frames: the loader places each on the clip frame with that exact source index
 and leaves all other frames NaN. Rejected FHO actions are skipped.
 
-**Contact (derived).** No dataset ships contact labels. For HOI4D, `egograph/data/contact.py`
+**Contact (derived).** No loaded dataset ships per-frame contact labels (EPIC VISOR does, on
+sparse frames, but is not loaded yet; see below). For HOI4D, `egograph/data/contact.py`
 computes the signed distance from each hand's 21 3D joints to each object's oriented box.
 `contact = distance < 1 cm`. The threshold was calibrated on 40 rigid HOI4D sequences against
 their action labels: carry/pick-up/put-down 98–99% in contact, grasp 92%, reach-out 26%,
@@ -232,3 +254,6 @@ Added 2026-11-18:
 - **scene cloud** (HOI4D, off by default): 60k points of the 3Dseg cloud projected with the
   frame's camera pose, z-buffered, coloured by semantic label. The ~1 in 5 misregistered
   sequences (section 3) are obvious here, e.g. `ZY20210800001-H1-C1-N19-S100-s02-T1`.
+- **⧉ split view** (key `v`, paused only): the depth or mask image in its own pane beside the
+  video at full opacity, with a 0.2–2.0 m turbo colour bar for depth. With both layers on, depth
+  goes to the pane and masks stay on the video.
