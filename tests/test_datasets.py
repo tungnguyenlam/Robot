@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 
 from conftest import require_index
-from egograph.data import EgoLoader
-from egograph.data.geometry import box_corners, project, transform_points
-from egograph.data.loader import sample_windows
+from robot.data import EgoLoader
+from robot.data.geometry import box_corners, project, transform_points
+from robot.data.loader import sample_windows
 
 
 @pytest.fixture(scope="module")
@@ -65,9 +65,9 @@ def test_epic_actions_and_windows(loader):
 @require_index("hoi4d")
 def test_torch_dataset_batches(loader):
     torch = pytest.importorskip("torch")
-    from egograph.config import load_config
-    from egograph.data.torch_dataset import EgoClipDataset
-    from egograph.paths import REPO_ROOT
+    from robot.config import load_config
+    from robot.data.torch_dataset import EgoClipDataset
+    from robot.paths import REPO_ROOT
 
     cfg = load_config(REPO_ROOT / "configs" / "experiment" / "example_dataloader.yaml",
                       ["data.sources.0.max_sequences=2", "data.sources.1.max_sequences=1"])
@@ -136,7 +136,7 @@ def test_epic_audio_imu():
 
 @require_index("ego4d")
 def test_ego4d_fho_boxes():
-    from egograph.paths import cache_root
+    from robot.paths import cache_root
     import json
 
     L = EgoLoader(modalities=["rgb"])
@@ -156,8 +156,8 @@ def test_ego4d_fho_boxes():
 def test_ego4d_fho_keyframes():
     import json
 
-    from egograph.data.contact import fho_keyframes
-    from egograph.paths import cache_root
+    from robot.data.contact import fho_keyframes
+    from robot.paths import cache_root
 
     L = EgoLoader(modalities=["rgb"])
     m = next(x for x in L.index("ego4d").metas if "keyframes" in x.modalities)
@@ -174,7 +174,7 @@ def test_viewer_hand_mesh_contact_scene():
     pytest.importorskip("smplx")
     from fastapi.testclient import TestClient
 
-    from egograph.viewer.app import create_app
+    from robot.viewer.app import create_app
 
     L = EgoLoader(modalities=["rgb"])
     m = next(x for x in L.index("hoi4d").metas if "contact" in x.modalities and "scene" in x.modalities)

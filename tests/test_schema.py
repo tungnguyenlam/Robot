@@ -1,6 +1,6 @@
 import numpy as np
 
-from egograph.data.schema import ActionSegment, Annotations, Clip, ObjectTrack, SequenceMeta
+from robot.data.schema import ActionSegment, Annotations, Clip, ObjectTrack, SequenceMeta
 
 
 def _clip(T=5):

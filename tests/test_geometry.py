@@ -1,8 +1,8 @@
 import numpy as np
 
-from egograph.data.geometry import box_corners, project, scale_intrinsics, transform_points
-from egograph.data.schema import Annotations, Clip, SequenceMeta
-from egograph.data.transforms import CenterCrop, Compose, Resize
+from robot.data.geometry import box_corners, project, scale_intrinsics, transform_points
+from robot.data.schema import Annotations, Clip, SequenceMeta
+from robot.data.transforms import CenterCrop, Compose, Resize
 
 
 def test_transforms_keep_projection_consistent():

@@ -179,3 +179,26 @@
 - Docs: MODALITIES.md (coverage rows, VISOR source section, viewer split view), DATASETS_GUIDE.md
   (VISOR step), ARCHITECTURE.md (mesh.py, FHO key frames, ego4d_select_fho.py), README.md
   (egoformat-v1.1, Modalities link).
+
+## 2026-11-19 - EPIC VISOR masks + hand contact in the adapter and viewer (`seg_sparse`)
+- Correction to the entry above: 53 of our 156 EPIC videos have VISOR (45 train, 8 val), not 62;
+  the other 9 downloaded (P01_14, P02_12, P03_22–24, P04_24–26, P04_33) have no local video.
+- Frame mapping: VISOR frame n = last video frame with timestamp < n/R, R = round(fps) (60 for
+  59.94 fps, 50 for 50 fps). `visor.frame_map` uses packet timestamps → VideoReader index.
+  The closed form ceil(n·fps/R)−1 fails after a timestamp gap (P05_08: off by 1 after n≈35k).
+  Checked vs VISOR's own JPEGs: 52/52 sampled frames exact on P01_03, P05_08, P01_103.
+  `frame_mapping.json` (→ old rgb_frames) not used. Duplicate landings deduped, manual wins.
+- New: `adapters/visor.py`, `PolygonMasks` + `CONTACT_*` in schema, modality `seg_sparse` (53),
+  `adapter.load_polygon_masks`, polygons Douglas–Peucker-simplified (~1.7 px @1080p, 4× fewer
+  points; cv2 if installed, numpy DP was 50x slower), cached per video (662 MB) via `egograph
+  prepare`: 48 min incl. 89 IMU caches that were missing. 14,214 manual + 866,904 interpolated
+  frames, 18,588 hand contacts (= raw counts). Not in tensors yet.
+- Viewer: layers "masks (VISOR)" + "mask names", hand→object contact on manual frames (pink),
+  manual/interpolated banner, timeline lane, `,`/`.` jump to GT frames, "Masks (VISOR)" card,
+  gzip on API. Busiest chunk 0.5 MB gz. Screenshots: results/viewer_check/epic_visor_*.jpg.
+- Tests: 31 pass (+4 test_visor.py). EPIC reindexed; viewer restarted on :8765.
+
+## 2026-11-19 - Rename package from egograph to robot
+- Renamed `src/egograph` to `src/robot`, updated `pyproject.toml` (`name = "robot"`, CLI `robot = "robot.cli:main"`), and updated imports, tests, scripts, and docs (`AGENTS.md`, `README.md`, `docs/*.md`).
+- Kept the conda environment name `egograph` (`~/miniforge3/envs/egograph`) unchanged on amdserver.
+- Reinstalled editable (`pip install --no-build-isolation --no-deps -e .`); `pytest -q` passes (31 passed) and `robot status` runs cleanly.

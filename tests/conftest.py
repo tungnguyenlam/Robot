@@ -1,6 +1,6 @@
 import pytest
 
-from egograph.data.index import index_path
+from robot.data.index import index_path
 
 
 def require_index(dataset: str):

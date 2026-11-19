@@ -5,11 +5,11 @@ import struct
 import numpy as np
 import pytest
 
-from egograph.data.contact import box_signed_distance, hand_object_contact
-from egograph.data.gpmf import GOPRO_TO_OPENCV, _orin_to_xyz, _walk
-from egograph.data.modalities import MODALITIES, check
-from egograph.data.schema import (Annotations, Clip, ImuTrack, ObjectTrack, ScenePoints, SequenceMeta)
-from egograph.data.transforms import CenterCrop, Resize
+from robot.data.contact import box_signed_distance, hand_object_contact
+from robot.data.gpmf import GOPRO_TO_OPENCV, _orin_to_xyz, _walk
+from robot.data.modalities import MODALITIES, check
+from robot.data.schema import (Annotations, Clip, ImuTrack, ObjectTrack, ScenePoints, SequenceMeta)
+from robot.data.transforms import CenterCrop, Resize
 
 
 def _meta(T=4, H=40, W=60, mods=("rgb", "depth", "seg")):
@@ -126,7 +126,7 @@ def test_tensors_fixed_shapes_and_missing_modalities():
     pytest.importorskip("torch")
     from torch.utils.data import default_collate
 
-    from egograph.data.torch_dataset import clip_to_tensors
+    from robot.data.torch_dataset import clip_to_tensors
 
     mods = {"rgb", "depth", "seg", "audio", "imu", "gaze", "scene", "contact", "keyframes"}
     full = clip_to_tensors(_clip(), modalities=mods, audio_samples=2000, scene_points=64)
@@ -147,8 +147,8 @@ def test_tensors_fixed_shapes_and_missing_modalities():
 
 
 def test_fho_keyframes_map_to_nearest_clip_frame():
-    from egograph.data.contact import KEYFRAME_KINDS, fho_keyframes
-    from egograph.data.schema import ActionSegment
+    from robot.data.contact import KEYFRAME_KINDS, fho_keyframes
+    from robot.data.schema import ActionSegment
 
     ann = Annotations.empty(np.arange(100, 120, 2), 30.0)            # every 2nd frame: 100..118
     kf, labelled = fho_keyframes(ann)

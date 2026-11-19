@@ -2,23 +2,24 @@
 
 ```
 Robot/
-├── pyproject.toml               package "egograph" (pip install -e ".[torch,web,dev]")
+├── pyproject.toml               package "robot" (pip install -e ".[torch,web,dev]")
 ├── configs/
 │   ├── data/base.yaml           shared data defaults (clip_len, fps, transforms)
 │   └── experiment/*.yaml        one file per experiment; inherits with `_base_`
-├── src/egograph/
+├── src/robot/
 │   ├── paths.py                 EGO_DATA_ROOT / EGO_INDEX_ROOT / EGO_MANO_DIR / EGO_RUNS_ROOT
 │   ├── config.py                YAML loading, `_base_` inheritance, `a.b.0.c=value` overrides
-│   ├── cli.py                   `egograph status | index | prepare | modalities | export | viewer`
+│   ├── cli.py                   `robot status | index | prepare | modalities | export | viewer`
 │   ├── data/
 │   │   ├── schema.py            egoformat-v1.1 (SequenceMeta, Clip, Annotations, HandTrack, ObjectTrack,
-│   │   │                        ImuTrack, ScenePoints, ObjectMesh)
+│   │   │                        ImuTrack, ScenePoints, ObjectMesh, PolygonMasks)
 │   │   ├── modalities.py        registry of modality names, sources and tensor keys
 │   │   ├── adapters/            one file per dataset (the only code that knows raw layouts)
 │   │   │   ├── base.py          DatasetAdapter interface and registry
 │   │   │   ├── hoi4d.py         3D GT: MANO hands, 6-DoF objects, camera trajectory, actions,
 │   │   │   │                    depth, 2D masks, scene point cloud, CAD meshes
-│   │   │   ├── epic_kitchens.py videos, narrated action segments, audio, GoPro IMU
+│   │   │   ├── epic_kitchens.py videos, narrated action segments, audio, GoPro IMU, VISOR masks
+│   │   │   ├── visor.py         VISOR polygon masks + hand contact: frame mapping, simplification, cache
 │   │   │   └── ego4d.py         videos, narrations, FHO actions with hand/object boxes and
 │   │   │                        contact/PNR frames, audio, IMU, gaze
 │   │   ├── index.py             cached JSONL sequence index per dataset
@@ -51,6 +52,7 @@ raw files ──adapter.scan()──► index (JSONL) ──sample_windows()─�
                                                                       │
              adapter.load_annotations() + VideoReader.read() ◄────────┘
              + adapter.load_{depth,seg,audio,imu,gaze,scene,meshes}() for requested modalities
+             (adapter.load_polygon_masks() is sequence-level, used by the viewer)
                                    │
                              Clip (egoformat-v1.1) ──transforms──► Clip
                                    │
@@ -62,12 +64,12 @@ raw files ──adapter.scan()──► index (JSONL) ──sample_windows()─�
 
 | Month | Work | Where |
 |---|---|---|
-| 2 | StableHand / EgoGrasp / WHOLE inference | `egograph/extractors/<name>.py` subclasses `PoseExtractor`. Each baseline keeps its own conda env and repo; the wrapper calls it and converts the output to `Annotations`. Predictions are cached with `Clip.save` under `runs/<run>/predictions/` |
-| 2 | failure profiling (occlusion, penetration, jitter) | `egograph/eval/` metrics on `Annotations` vs HOI4D GT; the viewer overlays predictions next to GT |
-| 3 | spatio-temporal hand-object graph | `egograph/graph/` builds nodes from `HandTrack.joints_3d` (edges from `HAND_PARENTS`) and `ObjectTrack` boxes/keypoints, with contact and proximity edges |
-| 4 | graph-conditioned diffusion / flow matching | `egograph/models/`, `egograph/losses/`, trained from `configs/experiment/*.yaml` with `utils/run.py` |
-| 5 | retargeting and VLA distillation | `egograph/retarget/`, `egograph/policy/` |
-| 6 | simulation (Isaac Lab / SAPIEN) | `egograph/sim/` |
+| 2 | StableHand / EgoGrasp / WHOLE inference | `robot/extractors/<name>.py` subclasses `PoseExtractor`. Each baseline keeps its own conda env and repo; the wrapper calls it and converts the output to `Annotations`. Predictions are cached with `Clip.save` under `runs/<run>/predictions/` |
+| 2 | failure profiling (occlusion, penetration, jitter) | `robot/eval/` metrics on `Annotations` vs HOI4D GT; the viewer overlays predictions next to GT |
+| 3 | spatio-temporal hand-object graph | `robot/graph/` builds nodes from `HandTrack.joints_3d` (edges from `HAND_PARENTS`) and `ObjectTrack` boxes/keypoints, with contact and proximity edges |
+| 4 | graph-conditioned diffusion / flow matching | `robot/models/`, `robot/losses/`, trained from `configs/experiment/*.yaml` with `utils/run.py` |
+| 5 | retargeting and VLA distillation | `robot/retarget/`, `robot/policy/` |
+| 6 | simulation (Isaac Lab / SAPIEN) | `robot/sim/` |
 
 Each new module consumes `Clip`/`Annotations` rather than raw files. To add a dataset (for
 example ARCTIC, HOT3D, or DexYCB), write a single adapter.

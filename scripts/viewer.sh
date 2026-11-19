@@ -13,7 +13,7 @@ case "${1:-status}" in
     running && { echo "already running (pid $(cat $PID))"; exit 0; }
     HOST=${2:-$(tailscale ip -4 2>/dev/null | head -1 || echo 127.0.0.1)}
     PORT=${3:-8765}
-    nohup setsid "$PY" -m egograph.cli viewer --host "$HOST" --port "$PORT" >"$LOG" 2>&1 </dev/null &
+    nohup setsid "$PY" -m robot.cli viewer --host "$HOST" --port "$PORT" >"$LOG" 2>&1 </dev/null &
     echo $! >"$PID"
     sleep 2; running && echo "viewer: http://$HOST:$PORT  (log: $LOG)" || { tail "$LOG"; exit 1; } ;;
   stop) running && kill "$(cat $PID)" && rm -f $PID && echo stopped || echo "not running" ;;

@@ -1,4 +1,4 @@
-from egograph.config import load_config
+from robot.config import load_config
 
 
 def test_base_merge_and_overrides(tmp_path):
@@ -9,6 +9,6 @@ def test_base_merge_and_overrides(tmp_path):
 
 
 def test_repo_configs_load():
-    from egograph.paths import REPO_ROOT
+    from robot.paths import REPO_ROOT
     for p in (REPO_ROOT / "configs" / "experiment").glob("*.yaml"):
         assert "data" in load_config(p)

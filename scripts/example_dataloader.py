@@ -9,8 +9,8 @@ import time
 
 import torch
 
-from egograph.config import load_config
-from egograph.data.torch_dataset import EgoClipDataset
+from robot.config import load_config
+from robot.data.torch_dataset import EgoClipDataset
 
 
 def main() -> None:

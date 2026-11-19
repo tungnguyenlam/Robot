@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from conftest import require_index
-from egograph.data.mesh import load_mesh, read_obj, sample_surface, simplify
+from robot.data.mesh import load_mesh, read_obj, sample_surface, simplify
 
 
 def _cube_obj(path, s=0.1):
@@ -30,7 +30,7 @@ def test_obj_sampling_and_cache(tmp_path, monkeypatch):
 
 @require_index("hoi4d")
 def test_hoi4d_meshes():
-    from egograph.data import EgoLoader
+    from robot.data import EgoLoader
 
     L = EgoLoader(modalities=["mesh"], adapter_kwargs={"hoi4d": {"mano": False}})
     idx = L.index("hoi4d")
@@ -52,9 +52,9 @@ def test_hoi4d_meshes():
 @require_index("hoi4d")
 def test_mesh_tensors_and_clip_roundtrip(tmp_path):
     pytest.importorskip("torch")
-    from egograph.data import EgoLoader
-    from egograph.data.schema import Clip
-    from egograph.data.torch_dataset import clip_to_tensors
+    from robot.data import EgoLoader
+    from robot.data.schema import Clip
+    from robot.data.torch_dataset import clip_to_tensors
 
     L = EgoLoader(modalities=["mesh"], adapter_kwargs={"hoi4d": {"mano": False}})
     m = next(x for x in L.index("hoi4d").metas if "mesh" in x.modalities and not x.tags["rigid"])

@@ -1,7 +1,7 @@
 import av
 import numpy as np
 
-from egograph.data.video import VideoReader, probe
+from robot.data.video import VideoReader, probe
 
 
 def _write(path, n=60, fps=30, gop=12):
