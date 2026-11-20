@@ -4,6 +4,12 @@
   the shared `.gitignore`, that gives this machine's hardware, its role, and the fleet layout
   (macmini, thinkbook, amdserver). Datasets live on amdserver.
 
+## Git
+
+- Work only on `main`. Don't create feature branches or worktrees; commit straight to
+  `main`. The old `data-modalities` and `revert-viewer-upgrade` branches are merged and
+  no longer used.
+
 ## Worklog
 
 - Append decisions and results to the bottom of `WORKLOG.md` with `cat >> WORKLOG.md`

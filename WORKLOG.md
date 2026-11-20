@@ -202,3 +202,10 @@
 - Renamed `src/egograph` to `src/robot`, updated `pyproject.toml` (`name = "robot"`, CLI `robot = "robot.cli:main"`), and updated imports, tests, scripts, and docs (`AGENTS.md`, `README.md`, `docs/*.md`).
 - Kept the conda environment name `egograph` (`~/miniforge3/envs/egograph`) unchanged on amdserver.
 - Reinstalled editable (`pip install --no-build-isolation --no-deps -e .`); `pytest -q` passes (31 passed) and `robot status` runs cleanly.
+
+## 2026-11-20 - Viewer video toggle; all work moves to main
+- Viewer: new "▣ video" button (key `b`) hides the RGB video so overlays (pose, masks,
+  depth, scene cloud) draw on black; a depth/mask image on the main stage then shows at
+  full opacity. Documented in `docs/MODALITIES.md`.
+- Git: `data-modalities` fast-forwarded into `main`. From now on we work only on `main`
+  (rule added to `AGENTS.md`); no feature branches.
