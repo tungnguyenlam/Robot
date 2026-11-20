@@ -55,7 +55,7 @@ const HAND_SIDES = ["left", "right"];
 
 const S = {
   datasets: [], ds: null, q: "", require: new Set(), mods: new Set(), tags: {}, offset: 0, total: 0,
-  seq: null, frame: 0, chunks: new Map(), pending: new Set(), meshes: new Map(), handMesh: new Map(), handFaces: null, scene: null, keyframes: [], layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
+  seq: null, frame: 0, chunks: new Map(), pending: new Set(), meshes: new Map(), handMesh: new Map(), handFaces: null, scene: null, keyframes: [], hideVideo: false, layers: Object.fromEntries(LAYERS.map((l) => [l.key, l.on])),
 };
 
 // ─────────────────────────────── datasets ───────────────────────────────
@@ -668,6 +668,12 @@ function loadModImage(img, slot, kind, f, paused) {
     img.src = `/api/modality/${m.dataset}/${encodeURIComponent(m.sequence_id)}/${kind}/${f}.png?w=${slot === "side" ? 1280 : 960}`;
   }, 120);
 }
+// Hide the RGB video so the other modalities (pose, masks, depth, scene cloud) read clearly.
+function setVideo(on) {
+  S.hideVideo = !on;
+  $("#stage").classList.toggle("no-video", !on);
+  $("#video-toggle").classList.toggle("on", on);
+}
 function setSplit(on) {
   S.split = on;
   $("#side").hidden = !on;
@@ -758,9 +764,11 @@ function bindPlayer() {
       if (a) seekTime(a.start_s + 0.001);
     } else if (e.key === "." || e.key === ",") jumpVisor(e.key === "." ? 1 : -1);
     else if (e.key === "v" && !e.ctrlKey && !e.metaKey) setSplit(!S.split);
+    else if (e.key === "b" && !e.ctrlKey && !e.metaKey) setVideo(S.hideVideo);
   });
   $("#clip-run").onclick = runClip;
   $("#split").onclick = () => setSplit(!S.split);
+  $("#video-toggle").onclick = () => setVideo(S.hideVideo);
   $("#visor-prev").onclick = () => jumpVisor(-1);
   $("#visor-next").onclick = () => jumpVisor(1);
 }

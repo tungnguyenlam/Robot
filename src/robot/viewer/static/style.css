@@ -98,6 +98,9 @@ kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--line)
 /* split view: depth / masks in their own pane, full opacity */
 .stage-wrap.split { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; }
 .stage-wrap.split .stage { max-height: none; width: 100%; }
+/* video hidden: overlays on black, depth / mask image at full opacity */
+.stage.no-video video { visibility: hidden; }
+.stage.no-video .mod-img { opacity: 1; }
 .stage.side { background: #000; }
 .stage.side .mod-img { opacity: 1; object-fit: contain; }
 .side-note { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; padding: 12px; }

@@ -283,3 +283,8 @@ Added 2026-11-19:
 - **⧉ split view** (key `v`, paused only): the depth or mask image in its own pane beside the
   video at full opacity, with a 0.2–2.0 m turbo colour bar for depth. With both layers on, depth
   goes to the pane and masks stay on the video.
+
+Added 2026-11-20:
+- **▣ video** (key `b`): hides the RGB video so only the overlays draw, on black. A depth or
+  mask image drawn on the main stage then shows at full opacity instead of 55%. Playback,
+  seeking and the timeline keep working; the video element is only made invisible.
