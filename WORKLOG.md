@@ -209,3 +209,7 @@
   full opacity. Documented in `docs/MODALITIES.md`.
 - Git: `data-modalities` fast-forwarded into `main`. From now on we work only on `main`
   (rule added to `AGENTS.md`); no feature branches.
+
+## 2026-11-21 - DataLoader-only dataset statistics notebooks + no-frame transform fix
+- Added 3 DataLoader-only analysis notebooks under `src/notebooks/` using exclusively `EgoClipDataset.from_config` + `torch.utils.data.DataLoader` (no raw files, indexes, or adapters): `01_hoi4d_statistics.ipynb`, `02_epic_kitchens_statistics.ipynb`, and `03_ego4d_statistics.ipynb`. All 3 executed cleanly end-to-end with the `egograph` kernel (installed `matplotlib`, `pandas`, `seaborn`, `ipykernel`, `nbformat`, `nbclient` into `egograph`).
+- Fixed a transform bug exposed by the Ego4D annotation-only DataLoader pass: when `frames`/`depth`/`seg` are `None`, `Resize` followed by `CenterCrop` computed the crop offset from the unresized `meta.(height, width)`. `transforms.py` now tracks `_grid_hw` on the `Clip` without mutating `SequenceMeta` (also respected by `clip_to_tensors` in `torch_dataset.py`), with regression test `tests/test_geometry.py::test_transforms_without_frames_match_with_frames`. `pytest -q`: 32 passed.

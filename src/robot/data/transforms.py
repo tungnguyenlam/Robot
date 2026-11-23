@@ -23,6 +23,9 @@ def _grid_hw(clip: Clip) -> tuple[int, int]:
     for a in (clip.frames, clip.depth, clip.seg):
         if a is not None:
             return a.shape[1:3]
+    grid = getattr(clip, "_grid_hw", None)
+    if grid is not None:
+        return grid
     return clip.meta.height, clip.meta.width
 
 
@@ -61,6 +64,7 @@ class Resize:
         if clip.K is not None:
             clip.K = scale_intrinsics(clip.K, sx, sy)
         _map_pixels(clip, sx, sy, 0.0, 0.0)
+        clip._grid_hw = (h, w)
         return clip
 
 
@@ -82,6 +86,7 @@ class CenterCrop:
         if clip.K is not None:
             clip.K = crop_intrinsics(clip.K, x0, y0)
         _map_pixels(clip, 1.0, 1.0, x0, y0)
+        clip._grid_hw = (min(self.height, H), min(self.width, W))
         return clip
 
 

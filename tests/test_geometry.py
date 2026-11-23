@@ -22,6 +22,26 @@ def test_transforms_keep_projection_consistent():
     np.testing.assert_allclose(project(h.joints_3d, clip.K), clip.annotations.hands["left"].joints_2d, atol=0.05)
 
 
+def test_transforms_without_frames_match_with_frames():
+    """Resize + CenterCrop must transform 2D labels and K identically when frames/depth/seg are None."""
+    K = np.array([[1000, 0, 960], [0, 1000, 540], [0, 0, 1]], np.float32)
+    meta = SequenceMeta("toy", "s", "v", 30, 10, 1920, 1080, 1, intrinsics=K.tolist())
+
+    def make_clip(with_frames: bool) -> Clip:
+        ann = Annotations.empty(np.arange(2), 30)
+        ann.hands["right"].bbox_2d[:] = [700, 300, 1100, 700]
+        ann.gaze_2d = np.array([[960.0, 540.0], [1000.0, 600.0]], np.float32)
+        frames = np.zeros((2, 1080, 1920, 3), np.uint8) if with_frames else None
+        return Clip(meta, frames, K.copy(), ann)
+
+    tf = Compose([Resize(256), CenterCrop(256, 256)])
+    c_rgb = tf(make_clip(True))
+    c_no = tf(make_clip(False))
+    np.testing.assert_allclose(c_no.K, c_rgb.K, atol=1e-5)
+    np.testing.assert_allclose(c_no.annotations.hands["right"].bbox_2d, c_rgb.annotations.hands["right"].bbox_2d, atol=1e-5)
+    np.testing.assert_allclose(c_no.annotations.gaze_2d, c_rgb.annotations.gaze_2d, atol=1e-5)
+
+
 def test_scale_intrinsics_pixel_centres():
     K = np.array([[100, 0, 49.5], [0, 100, 49.5], [0, 0, 1]], np.float32)  # centre of a 100 px image
     K2 = scale_intrinsics(K, 0.5, 0.5)

@@ -91,7 +91,7 @@ def clip_to_tensors(clip: Clip, max_objects: int = 4, modalities: set[str] | Non
         for x in (clip.frames, clip.depth, clip.seg):
             if x is not None:
                 return x.shape[1:3]
-        return clip.meta.height, clip.meta.width
+        return getattr(clip, "_grid_hw", (clip.meta.height, clip.meta.width))
 
     if "rgb" in want and clip.frames is not None:
         out["frames"] = torch.from_numpy(clip.frames).permute(0, 3, 1, 2).float().div_(255)   # (T, 3, H, W)
